@@ -58,7 +58,6 @@ struct TestClass
 Int32 TestClass::s_destructionCounter = 0;
 Int32 TestClass::s_staticFuncCounter = 0;
 
-
 struct A
 {
     A()
@@ -319,15 +318,16 @@ const Suite spec[] =
             luanatic::initialize(state);
             luanatic::LuaValue globals = luanatic::globalsTable(state);
             globals.
-            registerFunction("add", LUANATIC_FUNCTION(add)).
-            registerFunction("subtract", LUANATIC_FUNCTION(subtract)).
-            registerFunction("passThrough", LUANATIC_FUNCTION(passThrough)).
-            registerFunction("setStaticFlat", LUANATIC_FUNCTION(setStaticFlat));
+            registerFunction("add", LUANATIC_FUNCTION(&add)).
+            registerFunction("subtract", LUANATIC_FUNCTION(&subtract)).
+            registerFunction("passThrough", LUANATIC_FUNCTION(&passThrough)).
+            registerFunction("setStaticFlat", LUANATIC_FUNCTION(&setStaticFlat));
 
             Float32 res = globals.callFunction<Float32>("add", 1.0f, 1.5f);
             EXPECT(res == 2.5f);
 
             Float32 res2 = globals.callFunction<Float32>("subtract", 5.0f, 1.5f);
+            printf("%f\n", res2);
             EXPECT(res2 == 3.5f);
 
             Int32 res3 = globals.callFunction<Int32>("passThrough", 123);
@@ -339,7 +339,7 @@ const Suite spec[] =
         lua_close(state);
     },
     SUITE("Basic Class Tests")
-    {
+    {   
         lua_State * state = luanatic::createLuaState();
         {
             luanatic::openStandardLibraries(state);
@@ -354,7 +354,7 @@ const Suite spec[] =
             addMemberFunction("get", LUANATIC_FUNCTION(&TestClass::get)).
             addAttribute("val", LUANATIC_ATTRIBUTE(&TestClass::val)).
             addAttribute("other", LUANATIC_ATTRIBUTE(&TestClass::other)).
-            addStaticFunction("staticFunction", LUANATIC_FUNCTION(TestClass::staticFunction));
+            addStaticFunction("staticFunction", LUANATIC_FUNCTION(&TestClass::staticFunction));
 
             globals.registerClass(tw);
 
@@ -425,11 +425,12 @@ const Suite spec[] =
             registerClass(bw).
             registerClass(cw).
             registerClass(dw).
-            registerFunction("printA", LUANATIC_FUNCTION(printA));
+            registerFunction("printA", LUANATIC_FUNCTION(&printA));
 
             String luaCode = "local anotherVar = CoolClass.new(1.5, 2.5)\n"
                              "assert(luanatic.isInstanceOf(anotherVar, A))\n"
                              "assert(luanatic.isInstanceOf(anotherVar, CoolClass))\n"
+                             "print(anotherVar.a, anotherVar.c)\n"
                              "assert(anotherVar.c == 2.5)\n"
                              "assert(anotherVar.a == 1.5)\n"
                              "anotherVar:doubleA()\n"
@@ -487,8 +488,8 @@ const Suite spec[] =
             luanatic::initialize(state);
             luanatic::LuaValue globals = luanatic::globalsTable(state);
 
-            globals.registerFunction("numbers", LUANATIC_RETURN_ITERATOR(numbers));
-            globals.registerFunction("numbersCopy", LUANATIC_FUNCTION(numbersCopy));
+            globals.registerFunction("numbers", LUANATIC_RETURN_ITERATOR(&numbers));
+            globals.registerFunction("numbersCopy", LUANATIC_FUNCTION(&numbersCopy));
             //check if the number sequence iteration works as expected
             String luaCode = "local i = 1 for obj in numbers() do assert(obj == i*2) i = i + 1 end\n"
                              "local expected = {2, 4, 6, 8, 10, 12}\n"
