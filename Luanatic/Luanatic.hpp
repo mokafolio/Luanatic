@@ -19,7 +19,7 @@ extern "C" {
 
 #define LUANATIC_KEY "__Luanatic"
 #define LUANATIC_FUNCTION(x) luanatic::detail::FunctionWrapper<decltype(x), x>::func
-#define LUANATIC_FUNCTION_OVERLOAD(sig, x) luanatic::detail::FunctionWrapper<sig, x>::func //to manually specify the signature
+#define LUANATIC_FUNCTION_OVERLOAD(sig, x) &luanatic::detail::FunctionWrapper<sig, x>::func //to manually specify the signature
 #define LUANATIC_ATTRIBUTE(x) luanatic::detail::AttributeWrapper<decltype(x), x>::func
 #define LUANATIC_RETURN_ITERATOR(x) luanatic::detail::IteratorWrapper<decltype(x), x, false>::func
 #define LUANATIC_RETURN_REF_ITERATOR(x) luanatic::detail::IteratorWrapper<decltype(x), x, true>::func
@@ -1388,28 +1388,84 @@ namespace luanatic
             stick::Int32 idx;
         };
 
-        template <class Ret, class... Args, Ret (*Func)(Args...)>
-        struct FunctionWrapper<Ret(Args...), Func>
+        template<class T, T... Ints> struct integer_sequence
         {
+        };
+
+        template<class S> struct next_integer_sequence;
+
+        template<class T, T... Ints> struct next_integer_sequence<integer_sequence<T, Ints...>>
+        {
+            using type = integer_sequence<T, Ints..., sizeof...(Ints)>;
+        };
+
+        template<class T, T I, T N> struct make_int_seq_impl;
+
+        template<class T, T N>
+            using make_integer_sequence = typename make_int_seq_impl<T, 0, N>::type;
+
+        template<class T, T I, T N> struct make_int_seq_impl
+        {
+            using type = typename next_integer_sequence<
+                typename make_int_seq_impl<T, I+1, N>::type>::type;
+        };
+
+        template<class T, T N> struct make_int_seq_impl<T, N, N>
+        {
+            using type = integer_sequence<T>;
+        };
+
+        template<std::size_t... Ints>
+        using index_sequence = integer_sequence<std::size_t, Ints...>;
+
+        template<std::size_t N>
+        using make_index_sequence = make_integer_sequence<std::size_t, N>;
+
+        template <class Ret, class F, class...Args, std::size_t...N>
+        inline Ret callFunctionImpl(lua_State * _state, F _callable, index_sequence<N...>)
+        {
+            return _callable(convert<Args>(_state, N)...);
+        }
+
+        template<class Ret, class F, class...Args>
+        inline Ret callFunction(lua_State * _state, F _callable)
+        {
+            return callFunctionImpl<Ret>(_state, _callable, make_index_sequence<sizeof...(Args)>());
+        }
+
+        template <class Ret, class... Args, Ret (*Func)(Args...)>
+        struct FunctionWrapper<Ret(*)(Args...), Func>
+        {
+
             static stick::Int32 func(lua_State * _luaState)
+            {
+                return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
+            }
+
+            template<std::size_t...N>
+            static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), 0);
 
             Indexer idx(1);
-            Pusher<Ret>::push(_luaState, (*Func)(convert<Args>(_luaState, idx.increment())...));
+            Pusher<Ret>::push(_luaState, (*Func)(convert<Args>(_luaState, 1 + N)...));
             return 1;
         }
         };
 
         template <class... Args, void (*Func)(Args...)>
-        struct FunctionWrapper<void(Args...), Func>
+        struct FunctionWrapper<void(*)(Args...), Func>
         {
             static stick::Int32 func(lua_State * _luaState)
+            {
+                return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
+            }
+
+            template<std::size_t...N>
+            static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), 0);
-
-            Indexer idx(1);
-            (*Func)(convert<Args>(_luaState, idx.increment())...);
+            (*Func)(convert<Args>(_luaState, 1 + N)...);
             return 0;
         }
         };
@@ -1418,25 +1474,35 @@ namespace luanatic
         struct FunctionWrapper<Ret (C::*)(Args...), Func>
         {
             static stick::Int32 func(lua_State * _luaState)
+            {
+                return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
+            }
+
+            template<std::size_t...N>
+            static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), -1); // - 1 for self
             C * obj = convertToTypeAndCheck<typename RawType<C>::Type>(_luaState, 1);
-            Indexer idx(2);
-            Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, idx.increment())...));
+            Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...));
             return 1;
         }
         };
 
-        template <class Ret, class C, class... Args,
-                  Ret (C::*Func)(Args...) const>
+        template <class Ret, class C, class... Args, Ret (C::*Func)(Args...) const>
         struct FunctionWrapper<Ret (C::*)(Args...) const, Func>
         {
+
             static stick::Int32 func(lua_State * _luaState)
+            {
+                return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
+            }
+
+            template<std::size_t...N>
+            static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), -1); // - 1 for self
             C * obj = convertToTypeAndCheck<typename RawType<C>::Type>(_luaState, 1);
-            Indexer idx(2);
-            Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, idx.increment())...));
+            Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...));
             return 1;
         }
         };
@@ -1444,12 +1510,18 @@ namespace luanatic
         template <class C, class... Args, void (C::*Func)(Args...)>
         struct FunctionWrapper<void (C::*)(Args...), Func>
         {
+
             static stick::Int32 func(lua_State * _luaState)
+            {
+                return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
+            }
+
+            template<std::size_t...N>
+            static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), -1); // - 1 for self
             C * obj = convertToTypeAndCheck<typename RawType<C>::Type>(_luaState, 1);
-            Indexer idx(2);
-            (obj->*Func)(convert<Args>(_luaState, idx.increment())...);
+            (obj->*Func)(convert<Args>(_luaState, 2 + N)...);
             return 0;
         }
         };
@@ -1457,12 +1529,18 @@ namespace luanatic
         template <class C, class... Args, void (C::*Func)(Args...) const>
         struct FunctionWrapper<void (C::*)(Args...) const, Func>
         {
+
             static stick::Int32 func(lua_State * _luaState)
+            {
+                return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
+            }
+
+            template<std::size_t...N>
+            static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), -1); // - 1 for self
             C * obj = convertToTypeAndCheck<typename RawType<C>::Type>(_luaState, 1);
-            Indexer idx(2);
-            (obj->*Func)(convert<Args>(_luaState, idx.increment())...);
+            (obj->*Func)(convert<Args>(_luaState, 2 + N)...);
             return 0;
         }
         };
@@ -1540,18 +1618,24 @@ namespace luanatic
             //from lua, so that in case of an error, we don't leak the newly created T obj
             static T * create(LuanaticState * _state, Args... _args)
             {
-                return _state->m_allocator->create<T>(_args...);
+                return _state->m_allocator->create<T>(std::forward<Args>(_args)...);
             }
 
+
             static stick::Int32 func(lua_State * _luaState)
+            {
+                return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
+            }
+
+            template<std::size_t...N>
+            static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
             {
                 LuanaticState * glua = luanaticState(_luaState);
                 STICK_ASSERT(glua != nullptr);
 
                 checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), 0);
 
-                Indexer idx(1);
-                T * obj = create(glua, convert<Args>(_luaState, idx.increment())...);
+                T * obj = create(glua, convert<Args>(_luaState, 1 + N)...);
 
                 if (obj)
                 {
@@ -1649,7 +1733,7 @@ namespace luanatic
         struct IteratorWrapper;
 
         template<class Ret, Ret(Func)(void), bool ForceReference>
-        struct IteratorWrapper<Ret(void), Func, ForceReference>
+        struct IteratorWrapper<Ret(*)(void), Func, ForceReference>
         {
             static stick::Int32 func(lua_State * _luaState)
         {
