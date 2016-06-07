@@ -1501,7 +1501,7 @@ namespace luanatic
         };
 
         template<class T>
-        struct AttributePusher<T, typename std::enable_if<std::is_integral<T>::value || std::is_enum<T>::value || std::is_floating_point<T>::value>::type>
+        struct AttributePusher < T, typename std::enable_if < std::is_integral<T>::value || std::is_enum<T>::value || std::is_floating_point<T>::value >::type >
         {
             static void push(lua_State * _luaState, T & _val)
             {
