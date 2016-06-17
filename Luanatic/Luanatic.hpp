@@ -2131,6 +2131,7 @@ namespace luanatic
                                     _name.cString());
                     lua_error(_state);
                 }
+                lua_pop(_state, 1);
             }
         };
 
@@ -2648,7 +2649,7 @@ namespace luanatic
         stick::String path = stick::String::concat(currentPath, ";", _path);
         lua_pushstring(_state, path.cString()); //package path newPath
         lua_setfield(_state, -3, "path");       //package path
-        lua_pop(_state, 2);                     //
+        lua_pop(_state, 3);                     //
     }
 }
 

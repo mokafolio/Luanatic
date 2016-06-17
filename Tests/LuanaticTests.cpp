@@ -322,19 +322,27 @@ const Suite spec[] =
             registerFunction("subtract", LUANATIC_FUNCTION(&subtract)).
             registerFunction("passThrough", LUANATIC_FUNCTION(&passThrough)).
             registerFunction("setStaticFlat", LUANATIC_FUNCTION(&setStaticFlat));
+            EXPECT(lua_gettop(state) == 0);
 
             Float32 res = globals.callFunction<Float32>("add", 1.0f, 1.5f);
             EXPECT(res == 2.5f);
+
+            EXPECT(lua_gettop(state) == 0);
 
             Float32 res2 = globals.callFunction<Float32>("subtract", 5.0f, 1.5f);
             printf("%f\n", res2);
             EXPECT(res2 == 3.5f);
 
+            EXPECT(lua_gettop(state) == 0);
+
             Int32 res3 = globals.callFunction<Int32>("passThrough", 123);
             EXPECT(res3 == 123);
 
+            EXPECT(lua_gettop(state) == 0);
+
             globals.callFunction<void>("setStaticFlat");
             EXPECT(bStaticFlag);
+            EXPECT(lua_gettop(state) == 0);
         }
         lua_close(state);
     },
