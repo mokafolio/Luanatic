@@ -2249,8 +2249,7 @@ namespace luanatic
 
             // first we check if this is an attribute
             lua_getmetatable(_luaState, 1); // obj key val mt
-            lua_getfield(_luaState, -1,
-                         "__attributes"); // obj key val mt __attributes
+            lua_getfield(_luaState, -1, "__attributes"); // obj key val mt __attributes
             lua_pushvalue(_luaState, -4); // obj key val mt __attributes key
             lua_gettable(_luaState,
                          -2); // obj key val mt __attributes funcOrNil
@@ -2259,25 +2258,19 @@ namespace luanatic
             if (!lua_isnil(_luaState, -1))
             {
                 // push the function arguments
-                lua_pushvalue(_luaState,
-                              1); // obj key val mt __attributes funcOrNil obj
-                lua_pushvalue(
-                    _luaState,
-                    3); // obj key val mt __attributes funcOrNil obj val
+                lua_pushvalue(_luaState,  1); // obj key val mt __attributes funcOrNil obj
+                lua_pushvalue( _luaState, 3); // obj key val mt __attributes funcOrNil obj val
                 lua_call(_luaState, 2, 0);
                 return 0;
             }
 
             lua_settop(_luaState, 3); // obj key val
-            lua_getfield(_luaState, LUA_REGISTRYINDEX,
-                         LUANATIC_KEY);             // obj key val gT
+            lua_getfield(_luaState, LUA_REGISTRYINDEX, LUANATIC_KEY);             // obj key val gT
             lua_getfield(_luaState, -1, "storage"); // obj key val gT storage
 
-            detail::ObjectIdentifier<T>::identify(_luaState,
-                                                  obj); // obj key gT storage id
+            detail::ObjectIdentifier<T>::identify(_luaState, obj); // obj key gT storage id
             lua_pushvalue(_luaState, -1);               // obj key val gT storage id id
-            lua_gettable(_luaState,
-                         -3); // obj key val gT storage id idtableOrNil
+            lua_gettable(_luaState, -3); // obj key val gT storage id idtableOrNil
 
             // Add the storage table if there isn't one already
             if (lua_isnil(_luaState, -1))
@@ -2301,19 +2294,16 @@ namespace luanatic
         {
             T * obj = convertToType<T>(_luaState, 1);
 
-            lua_getfield(_luaState, LUA_REGISTRYINDEX,
-                         LUANATIC_KEY);             // obj key gT
+            lua_getfield(_luaState, LUA_REGISTRYINDEX, LUANATIC_KEY);             // obj key gT
             lua_getfield(_luaState, -1, "storage"); // obj key gT storage
 
-            ObjectIdentifier<T>::identify(_luaState,
-                                          obj); // obj key gT storage id
+            ObjectIdentifier<T>::identify(_luaState,  obj); // obj key gT storage id
             lua_gettable(_luaState, -2);        // obj key gT storage objectStorage
 
             // check if storage table exists for this object
             if (!lua_isnil(_luaState, -1))
             {
-                lua_pushvalue(_luaState,
-                              -4); // obj key gT storage objectStorage key
+                lua_pushvalue(_luaState, -4); // obj key gT storage objectStorage key
                 lua_gettable(_luaState, -2); // obj key gT storage objectStorage objectStorage[key]
             }
 
@@ -2330,11 +2320,9 @@ namespace luanatic
                 if (lua_isnil(_luaState, -1))
                 {
                     lua_pop(_luaState, 1); // obj key mt
-                    lua_getfield(_luaState, -1,
-                                 "__attributes"); // obj key mt __attributes
+                    lua_getfield(_luaState, -1, "__attributes"); // obj key mt __attributes
                     lua_pushvalue(_luaState, -3); // obj key mt __attributes key
-                    lua_gettable(_luaState,
-                                 -2); // obj key mt __attributes funcOrNil
+                    lua_gettable(_luaState, -2); // obj key mt __attributes funcOrNil
 
                     // if we found a function, we call it
                     if (!lua_isnil(_luaState, -1))
