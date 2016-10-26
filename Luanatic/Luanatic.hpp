@@ -156,8 +156,7 @@ namespace luanatic
         static stick::Int32 convertAndCheck(lua_State * _luaState,
                                             stick::Int32 _index)
         {
-            return static_cast<stick::Int32>(
-                       luaL_checkinteger(_luaState, _index));
+            return static_cast<stick::Int32>(luaL_checkinteger(_luaState, _index));
         }
 
         static void push(lua_State * _luaState, const stick::Int32 & _value)
@@ -172,8 +171,7 @@ namespace luanatic
         static stick::Int16 convertAndCheck(lua_State * _luaState,
                                             stick::Int32 _index)
         {
-            return static_cast<stick::Int32>(
-                       luaL_checkinteger(_luaState, _index));
+            return static_cast<stick::Int16>(luaL_checkinteger(_luaState, _index));
         }
 
         static void push(lua_State * _luaState, const stick::Int16 & _value)
@@ -325,7 +323,7 @@ namespace luanatic
         {
             if (lua_isnil(_state, _index))
                 return stick::Error();
-            
+
             if (!lua_istable(_state, _index))
                 detail::luaErrorWithStackTrace(_state, _index, "Table expected to convert to stick::Error");
 
@@ -352,9 +350,9 @@ namespace luanatic
                 code = luaL_checkinteger(_state, -1);
             lua_getfield(_state, top, "category");
             if (!lua_isnil(_state, -1) && lua_isuserdata(_state, -1))
-                category = reinterpret_cast<stick::ErrorCategory*>(lua_touserdata(_state, -1));
+                category = reinterpret_cast<stick::ErrorCategory *>(lua_touserdata(_state, -1));
             lua_pop(_state, 5);
-            if(category)
+            if (category)
                 return stick::Error(code, *category, message ? message : "", fn ? fn : "", line);
             else
                 return stick::Error();
@@ -379,7 +377,7 @@ namespace luanatic
                 lua_setfield(_state, -2, "line");
                 lua_pushinteger(_state, _error.code());
                 lua_setfield(_state, -2, "code");
-                lua_pushlightuserdata(_state, (void*)&_error.category());
+                lua_pushlightuserdata(_state, (void *)&_error.category());
                 lua_setfield(_state, -2, "category");
             }
         }
@@ -1193,6 +1191,19 @@ namespace luanatic
         };
 
         // Convert to a raw pointer type.
+        template <>
+        struct Converter<void *>
+        {
+            using Ret = void*;
+
+            static Ret convert(lua_State * _luaState, stick::Int32 _index)
+            {
+                //TODO Check if this is userdata
+                return lua_touserdata(_luaState, _index);
+            }
+        };
+
+        // Convert to a raw pointer type.
         template <class T>
         struct Converter<T *>
         {
@@ -1329,6 +1340,16 @@ namespace luanatic
 
         template <class T, class Enable = void>
         struct Pusher;
+
+        template<>
+        struct Pusher<void *>
+        {
+            template <class OwnershipPolicy = KeepOwnership>
+            static void push(lua_State * _luaState, void * _val, const OwnershipPolicy & _policy = OwnershipPolicy())
+            {
+                lua_pushlightuserdata(_luaState, _val);
+            }
+        };
 
         template <class T>
         struct Pusher<T *>
