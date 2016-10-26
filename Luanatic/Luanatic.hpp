@@ -10,6 +10,7 @@
 
 #include <type_traits>
 #include <functional> //for std::ref
+#include <cstdint>
 
 extern "C" {
 #include <lauxlib.h>
@@ -322,7 +323,41 @@ namespace luanatic
     {
         static stick::Error convertAndCheck(lua_State * _state, stick::Int32 _index)
         {
-            return stick::Error();
+            if (lua_isnil(_state, _index))
+                return stick::Error();
+            
+            if (!lua_istable(_state, _index))
+                detail::luaErrorWithStackTrace(_state, _index, "Table expected to convert to stick::Error");
+
+            const char * message, * dsc, * fn;
+            message = dsc = fn = nullptr;
+            stick::Int32 line = 0;
+            stick::Int32 code = -1;
+            stick::ErrorCategory * category = nullptr;
+            auto top = lua_gettop(_state);
+            lua_getfield(_state, top, "message");
+            if (!lua_isnil(_state, -1))
+                message = luaL_checkstring(_state, -1);
+            // lua_getfield(_state, _index, "description");
+            // if (!lua_isnil(_state, -1))
+            //     dsc = lua_tostring(_state, -1);
+            lua_getfield(_state, top, "file");
+            if (!lua_isnil(_state, -1))
+                fn = luaL_checkstring(_state, -1);
+            lua_getfield(_state, top, "line");
+            if (!lua_isnil(_state, -1))
+                line = luaL_checkinteger(_state, -1);
+            lua_getfield(_state, top, "code");
+            if (!lua_isnil(_state, -1))
+                code = luaL_checkinteger(_state, -1);
+            lua_getfield(_state, top, "category");
+            if (!lua_isnil(_state, -1) && lua_isuserdata(_state, -1))
+                category = reinterpret_cast<stick::ErrorCategory*>(lua_touserdata(_state, -1));
+            lua_pop(_state, 5);
+            if(category)
+                return stick::Error(code, *category, message ? message : "", fn ? fn : "", line);
+            else
+                return stick::Error();
         }
 
         static void push(lua_State * _state, const stick::Error & _error)
@@ -344,6 +379,8 @@ namespace luanatic
                 lua_setfield(_state, -2, "line");
                 lua_pushinteger(_state, _error.code());
                 lua_setfield(_state, -2, "code");
+                lua_pushlightuserdata(_state, (void*)&_error.category());
+                lua_setfield(_state, -2, "category");
             }
         }
     };
@@ -1402,12 +1439,12 @@ namespace luanatic
         template<class T, T I, T N> struct make_int_seq_impl;
 
         template<class T, T N>
-            using make_integer_sequence = typename make_int_seq_impl<T, 0, N>::type;
+        using make_integer_sequence = typename make_int_seq_impl<T, 0, N>::type;
 
         template<class T, T I, T N> struct make_int_seq_impl
         {
-            using type = typename next_integer_sequence<
-                typename make_int_seq_impl<T, I+1, N>::type>::type;
+            using type = typename next_integer_sequence <
+                         typename make_int_seq_impl < T, I + 1, N >::type >::type;
         };
 
         template<class T, T N> struct make_int_seq_impl<T, N, N>
@@ -1438,12 +1475,12 @@ namespace luanatic
         {
 
             static stick::Int32 func(lua_State * _luaState)
-            {
-                return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
-            }
+        {
+            return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
+        }
 
-            template<std::size_t...N>
-            static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
+        template<std::size_t...N>
+        static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), 0);
 
@@ -1451,99 +1488,99 @@ namespace luanatic
             Pusher<Ret>::push(_luaState, (*Func)(convert<Args>(_luaState, 1 + N)...));
             return 1;
         }
-        };
+                };
 
         template <class... Args, void (*Func)(Args...)>
         struct FunctionWrapper<void(*)(Args...), Func>
         {
             static stick::Int32 func(lua_State * _luaState)
-            {
-                return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
-            }
+        {
+            return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
+        }
 
-            template<std::size_t...N>
-            static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
+        template<std::size_t...N>
+        static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), 0);
             (*Func)(convert<Args>(_luaState, 1 + N)...);
             return 0;
         }
-        };
+                };
 
         template <class Ret, class C, class... Args, Ret (C::*Func)(Args...)>
         struct FunctionWrapper<Ret (C::*)(Args...), Func>
         {
             static stick::Int32 func(lua_State * _luaState)
-            {
-                return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
-            }
+        {
+            return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
+        }
 
-            template<std::size_t...N>
-            static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
+        template<std::size_t...N>
+        static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), -1); // - 1 for self
             C * obj = convertToTypeAndCheck<typename RawType<C>::Type>(_luaState, 1);
             Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...));
             return 1;
         }
-        };
+                };
 
         template <class Ret, class C, class... Args, Ret (C::*Func)(Args...) const>
         struct FunctionWrapper<Ret (C::*)(Args...) const, Func>
         {
 
             static stick::Int32 func(lua_State * _luaState)
-            {
-                return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
-            }
+        {
+            return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
+        }
 
-            template<std::size_t...N>
-            static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
+        template<std::size_t...N>
+        static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), -1); // - 1 for self
             C * obj = convertToTypeAndCheck<typename RawType<C>::Type>(_luaState, 1);
             Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...));
             return 1;
         }
-        };
+                };
 
         template <class C, class... Args, void (C::*Func)(Args...)>
         struct FunctionWrapper<void (C::*)(Args...), Func>
         {
 
             static stick::Int32 func(lua_State * _luaState)
-            {
-                return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
-            }
+        {
+            return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
+        }
 
-            template<std::size_t...N>
-            static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
+        template<std::size_t...N>
+        static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), -1); // - 1 for self
             C * obj = convertToTypeAndCheck<typename RawType<C>::Type>(_luaState, 1);
             (obj->*Func)(convert<Args>(_luaState, 2 + N)...);
             return 0;
         }
-        };
+                };
 
         template <class C, class... Args, void (C::*Func)(Args...) const>
         struct FunctionWrapper<void (C::*)(Args...) const, Func>
         {
 
             static stick::Int32 func(lua_State * _luaState)
-            {
-                return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
-            }
+        {
+            return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
+        }
 
-            template<std::size_t...N>
-            static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
+        template<std::size_t...N>
+        static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), -1); // - 1 for self
             C * obj = convertToTypeAndCheck<typename RawType<C>::Type>(_luaState, 1);
             (obj->*Func)(convert<Args>(_luaState, 2 + N)...);
             return 0;
         }
-        };
+                };
 
         template <class T, T Attr>
         struct AttributeWrapper;
