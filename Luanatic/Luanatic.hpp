@@ -19,7 +19,20 @@ extern "C" {
 }
 
 #define LUANATIC_KEY "__Luanatic"
-#define LUANATIC_FUNCTION(x) luanatic::detail::FunctionWrapper<decltype(x), x>::func
+#define LUANATIC_FUNCTION_1(x) luanatic::detail::FunctionWrapper<decltype(x), x>::func
+#define LUANATIC_FUNCTION_P(x, ...) luanatic::detail::FunctionWrapper<decltype(x), x, __VA_ARGS__>::func
+#define LUANATIC_GET_MACRO(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,NAME,...) NAME
+#define LUANATIC_FUNCTION(...) LUANATIC_GET_MACRO(__VA_ARGS__, \
+LUANATIC_FUNCTION_P, \
+LUANATIC_FUNCTION_P, \
+LUANATIC_FUNCTION_P, \
+LUANATIC_FUNCTION_P, \
+LUANATIC_FUNCTION_P, \
+LUANATIC_FUNCTION_P, \
+LUANATIC_FUNCTION_P, \
+LUANATIC_FUNCTION_P, \
+LUANATIC_FUNCTION_P, \
+LUANATIC_FUNCTION_1)(__VA_ARGS__)
 #define LUANATIC_FUNCTION_OVERLOAD(sig, x) &luanatic::detail::FunctionWrapper<sig, x>::func //to manually specify the signature
 #define LUANATIC_ATTRIBUTE(x) luanatic::detail::AttributeWrapper<decltype(x), x>::func
 #define LUANATIC_RETURN_ITERATOR(x) luanatic::detail::IteratorWrapper<decltype(x), x, false>::func
@@ -832,8 +845,11 @@ namespace luanatic
             //register static functions in class table
             registerFunctions(_state, classTable, _wrapper.m_statics);
 
+            //TODO: is this still needed?
+            //if yes, lets replace integer with light userdata to make sure
+            //the integer is big enough to store a type id (which is a void*)
             lua_pushliteral(_state, "__typeID");            // ... CT __typeID
-            lua_pushinteger(_state, (stick::Size)myTypeID); // ... CT __typeID id
+            lua_pushlightuserdata(_state, myTypeID);        // ... CT __typeID id
             lua_settable(_state, classTable);               // ... CT
 
             lua_pushliteral(_state, "__index");             // ... CT mT __index
@@ -965,7 +981,7 @@ namespace luanatic
                     lua_getmetatable(_luaState, _index))
             {
                 lua_getfield(_luaState, -1, "__typeID");
-                stick::TypeID tid = (stick::TypeID)lua_tointeger(_luaState, -1);
+                stick::TypeID tid = (stick::TypeID)lua_touserdata(_luaState, -1);
                 if (tid == stick::TypeInfoT<T>::typeID())
                     ret = true;
 
@@ -994,13 +1010,12 @@ namespace luanatic
             {
                 return static_cast<T *>(pud->m_data);
             }
-            if (!_bStrict)
+            if (!_bStrict && std::is_polymorphic<T>())
             {
                 detail::LuanaticState * glua = detail::luanaticState(_luaState);
                 STICK_ASSERT(glua != nullptr);
 
-                auto result = detail::findCastFunction(
-                                  *glua, *pud, stick::TypeInfoT<T>::typeID());
+                auto result = detail::findCastFunction(*glua, *pud, stick::TypeInfoT<T>::typeID());
                 if (result.bFound)
                 {
                     return static_cast<T *>(result.userData.m_data);
@@ -1024,25 +1039,14 @@ namespace luanatic
             auto it = glua->m_typeIDClassMap.find(stick::TypeInfoT<T>::typeID());
             if (it != glua->m_typeIDClassMap.end())
             {
-                /*auto di = detail::debugInfo(_luaState, _index + 1);
-                luaL_error(_luaState, "%s, line %d: %s expected, got %s", di.source, di.currentline,
-                           glua->m_typeIDClassMap[stick::TypeInfoT<T>::typeID()].wrapper->m_className.cString(),
-                           luaL_typename(_luaState, _index));*/
                 detail::luaErrorWithStackTrace(_luaState, _index, "%s expected, got %s",
                                                glua->m_typeIDClassMap[stick::TypeInfoT<T>::typeID()].wrapper->m_className.cString(),
                                                luaL_typename(_luaState, _index));
             }
             else
             {
-                /*auto di = detail::debugInfo(_luaState, _index + 1);
-                printf("%s, %s\n", di.namewhat, di.name);
-                luaL_traceback(_luaState, _luaState, NULL, _index);
-                printf("%s\n", lua_tostring(_luaState, -1));
-                luaL_error(_luaState, "%s, line %d: Different unregistered type expected, got %s", di.source, di.currentline, luaL_typename(_luaState, _index));
-                */
                 detail::luaErrorWithStackTrace(_luaState, _index, "Different unregistered type expected, got %s", luaL_typename(_luaState, _index));
             }
-            //lua_error(_luaState);
         }
 
         return ret;
@@ -1069,6 +1073,7 @@ namespace luanatic
         {
             if (_bLuaOwnsObject)
             {
+                printf("OWNED BY LUA\n");
                 lua_getfield(_luaState, LUA_REGISTRYINDEX, LUANATIC_KEY); // glua
                 lua_getfield(_luaState, -1, "weakTable");                 // glua glua.weakTable
                 lua_remove(_luaState, -2);                                // glua.weakTable
@@ -1110,6 +1115,28 @@ namespace luanatic
                 }
                 else
                 {
+                    // if this type is not found in the inheritance chain,
+                    // we can assume, that the currently pushed type sits higher in the inheritance
+                    // chain, so we therefore update the type id associated with this instance.
+                    if (std::is_polymorphic<T>() && !isOfType<WT>(_luaState, -1, false))
+                    {
+                        // update the type id
+                        detail::UserData * userData = static_cast<detail::UserData *>(lua_touserdata(_luaState, -1));
+                        userData->m_typeID = stick::TypeInfoT<WT>::typeID();
+                        // update the metatable
+                        detail::LuanaticState * glua = detail::luanaticState(_luaState);
+                        STICK_ASSERT(glua != nullptr);
+                        auto it = glua->m_typeIDClassMap.find(stick::TypeInfoT<T>::typeID());
+                        if (it == glua->m_typeIDClassMap.end())
+                        {
+                            luaL_error(_luaState, "Can't push unregistered type to Lua!");
+                        }
+                        lua_rawgeti(_luaState, LUA_REGISTRYINDEX, (*it).value.namespaceIndex);
+                        lua_getfield(_luaState, -1, (*it).value.wrapper->m_className.cString()); // glua.weakTable id ud namespace mt
+                        lua_remove(_luaState, -2); // glua.weakTable id ud mt
+                        lua_setmetatable(_luaState, -2); // glua.weakTable id ud
+                    }
+                    //and return the existing user data associated with this instance
                     lua_replace(_luaState, -3); // ud id
                     lua_pop(_luaState, 1);      // ud
                     return true;
@@ -1117,6 +1144,7 @@ namespace luanatic
             }
             else
             {
+                printf("NOT OWNED BY LUA\n");
                 detail::LuanaticState * glua = detail::luanaticState(_luaState);
                 STICK_ASSERT(glua != nullptr);
 
@@ -1134,6 +1162,7 @@ namespace luanatic
 
                 lua_rawgeti(_luaState, LUA_REGISTRYINDEX, (*it).value.namespaceIndex);
                 lua_getfield(_luaState, -1, (*it).value.wrapper->m_className.cString()); // ud namespace mt
+
                 lua_remove(_luaState, -2); // ud mt
                 lua_setmetatable(_luaState, -2); // ud
             }
@@ -1178,8 +1207,83 @@ namespace luanatic
         new (ud) T(_value);
     }
 
+    namespace placeHolders
+    {
+        struct Result {};
+        struct One {};
+        struct Two {};
+        struct Three {};
+        struct Four {};
+        struct Five {};
+        struct Six {};
+        struct Seven {};
+        struct Eight {};
+        struct Nine {};
+        struct Ten {};
+    }
+
+    namespace ph = placeHolders;
+
+
+    template<class F>
+    struct Keep
+    {
+        using Target = F;
+
+        template<class T>
+        void apply(lua_State * _luaState, T * _obj) const
+        {
+            luanatic::push<T>(_luaState, _obj, false);
+        }
+    };
+
+    template<class F>
+    struct Transfer
+    {
+        using Target = F;
+
+        template<class T>
+        void apply(lua_State * _luaState, T * _obj) const
+        {
+            luanatic::push<T>(_luaState, _obj, true);
+        }
+    };
+
     namespace detail
     {
+        template<stick::Size N>
+        struct IndexToPlaceHolder;
+
+        template<>
+        struct IndexToPlaceHolder<1> { using Value = ph::One; };
+
+        template<>
+        struct IndexToPlaceHolder<2> { using Value = ph::Two; };
+
+        template<>
+        struct IndexToPlaceHolder<3> { using Value = ph::Three; };
+
+        template<>
+        struct IndexToPlaceHolder<4> { using Value = ph::Four; };
+
+        template<>
+        struct IndexToPlaceHolder<5> { using Value = ph::Five; };
+
+        template<>
+        struct IndexToPlaceHolder<6> { using Value = ph::Six; };
+
+        template<>
+        struct IndexToPlaceHolder<7> { using Value = ph::Seven; };
+
+        template<>
+        struct IndexToPlaceHolder<8> { using Value = ph::Eight; };
+
+        template<>
+        struct IndexToPlaceHolder<9> { using Value = ph::Nine; };
+
+        template<>
+        struct IndexToPlaceHolder<10> { using Value = ph::Ten; };
+
         template <class T, class Enable = void>
         struct Converter;
 
@@ -1190,7 +1294,6 @@ namespace luanatic
                          typename std::remove_reference<T>::type>::type>::type;
         };
 
-        // Convert to a raw pointer type.
         template <>
         struct Converter<void *>
         {
@@ -1320,23 +1423,23 @@ namespace luanatic
             return Converter<T>::convert(_luaState, _index);
         }
 
-        struct TransferOwnership
-        {
-            template <class T>
-            inline void push(lua_State * _luaState, const T * _obj) const
-            {
-                luanatic::push<T>(_luaState, _obj, true);
-            }
-        };
+        // struct TransferOwnership
+        // {
+        //     template <class T>
+        //     inline void push(lua_State * _luaState, const T * _obj) const
+        //     {
+        //         luanatic::push<T>(_luaState, _obj, true);
+        //     }
+        // };
 
-        struct KeepOwnership
-        {
-            template <class T>
-            inline void push(lua_State * _luaState, const T * _obj) const
-            {
-                luanatic::push<T>(_luaState, _obj, false);
-            }
-        };
+        // struct KeepOwnership
+        // {
+        //     template <class T>
+        //     inline void push(lua_State * _luaState, const T * _obj) const
+        //     {
+        //         luanatic::push<T>(_luaState, _obj, false);
+        //     }
+        // };
 
         template <class T, class Enable = void>
         struct Pusher;
@@ -1344,8 +1447,8 @@ namespace luanatic
         template<>
         struct Pusher<void *>
         {
-            template <class OwnershipPolicy = KeepOwnership>
-            static void push(lua_State * _luaState, void * _val, const OwnershipPolicy & _policy = OwnershipPolicy())
+            template <class Policy = Keep<ph::Result>>
+            static void push(lua_State * _luaState, void * _val, const Policy & _policy = Policy())
             {
                 lua_pushlightuserdata(_luaState, _val);
             }
@@ -1354,19 +1457,19 @@ namespace luanatic
         template <class T>
         struct Pusher<T *>
         {
-            template <class OwnershipPolicy = KeepOwnership>
-            static void push(lua_State * _luaState, T * _val, const OwnershipPolicy & _policy = OwnershipPolicy())
+            template <class Policy = Keep<ph::Result>>
+            static void push(lua_State * _luaState, T * _val, const Policy & _policy = Policy())
             {
                 // for pointers, we acknowledge the ownership policy
-                _policy.template push<typename RawType<T>::Type>(_luaState, _val);
+                _policy.template apply<typename RawType<T>::Type>(_luaState, _val);
             }
         };
 
         template <class T>
         struct Pusher<T &>
         {
-            template <class OwnershipPolicy = KeepOwnership>
-            static void push(lua_State * _luaState, T & _val, const OwnershipPolicy & _policy = OwnershipPolicy())
+            template <class Policy = Keep<ph::Result>>
+            static void push(lua_State * _luaState, T & _val, const Policy & _policy = Policy())
             {
                 // ownership policy does not apply for references or value types
                 luanatic::push<typename RawType<T>::Type>(_luaState, &_val, false);
@@ -1376,8 +1479,8 @@ namespace luanatic
         template <class T>
         struct Pusher<const T &>
         {
-            template <class OwnershipPolicy = KeepOwnership>
-            static void push(lua_State * _luaState, const T & _val, const OwnershipPolicy & _policy = OwnershipPolicy())
+            template <class Policy = Keep<ph::Result>>
+            static void push(lua_State * _luaState, const T & _val, const Policy & _policy = Policy())
             {
                 luanatic::pushValueType<typename RawType<T>::Type>(_luaState, _val);
             }
@@ -1386,8 +1489,8 @@ namespace luanatic
         template <class T>
         struct Pusher<T>
         {
-            template <class OwnershipPolicy = KeepOwnership>
-            static void push(lua_State * _luaState, T _val, const OwnershipPolicy & _policy = OwnershipPolicy())
+            template <class Policy = Keep<ph::Result>>
+            static void push(lua_State * _luaState, T _val, const Policy & _policy = Policy())
             {
                 // ownership policy does not apply for value types
                 luanatic::pushValueType<typename RawType<T>::Type>(_luaState, _val);
@@ -1398,8 +1501,8 @@ namespace luanatic
         template <stick::Size N>
         struct Pusher<char[N]>
         {
-            template <class OwnershipPolicy = KeepOwnership>
-            static void push(lua_State * _luaState, const char _val[N], const OwnershipPolicy & _policy = OwnershipPolicy())
+            template <class Policy = Keep<ph::Result>>
+            static void push(lua_State * _luaState, const char _val[N], const Policy & _policy = Policy())
             {
                 lua_pushstring(_luaState, _val);
             }
@@ -1426,25 +1529,6 @@ namespace luanatic
             }
             return true;
         }
-
-        template <class T, T Func>
-        struct FunctionWrapper;
-
-        struct Indexer
-        {
-            Indexer(stick::Int32 _idx) :
-                idx(_idx)
-            {
-
-            }
-
-            stick::Int32 increment()
-            {
-                return idx++;
-            }
-
-            stick::Int32 idx;
-        };
 
         template<class T, T... Ints> struct integer_sequence
         {
@@ -1479,6 +1563,49 @@ namespace luanatic
         template<std::size_t N>
         using make_index_sequence = make_integer_sequence<std::size_t, N>;
 
+
+        template<bool B, class Either, class Or>
+        struct MatchResult;
+
+        template<class Either, class Or>
+        struct MatchResult<true, Either, Or>
+        {
+            using Result = Either;
+        };
+
+        template<class Either, class Or>
+        struct MatchResult<false, Either, Or>
+        {
+            using Result = Or;
+        };
+
+        template<class For, class Default, class Current, class...Rest>
+        struct GetPolicyImpl
+        {
+            using Policy = typename MatchResult<std::is_same<For, typename Current::Target>::value,
+                  Current,
+                  typename GetPolicyImpl<For, Default, Rest...>::Policy>::Result;
+        };
+
+        template<class For, class Default, class Current>
+        struct GetPolicyImpl<For, Default, Current>
+        {
+            using Policy = typename MatchResult<std::is_same<For, typename Current::Target>::value,
+                  Current, Default>::Result;
+        };
+
+        template<class For, class Default, class...Policies>
+        struct GetPolicy
+        {
+            using Policy = typename GetPolicyImpl<For, Default, Policies...>::Policy;
+        };
+
+        template<class For, class Default>
+        struct GetPolicy<For, Default>
+        {
+            using Policy = Default;
+        };
+
         template <class Ret, class F, class...Args, std::size_t...N>
         inline Ret callFunctionImpl(lua_State * _state, F _callable, index_sequence<N...>)
         {
@@ -1491,8 +1618,11 @@ namespace luanatic
             return callFunctionImpl<Ret>(_state, _callable, make_index_sequence<sizeof...(Args)>());
         }
 
-        template <class Ret, class... Args, Ret (*Func)(Args...)>
-        struct FunctionWrapper<Ret(*)(Args...), Func>
+        template <class T, T Func, class...Policies>
+        struct FunctionWrapper;
+
+        template <class Ret, class... Args, Ret (*Func)(Args...), class...Policies>
+        struct FunctionWrapper<Ret(*)(Args...), Func, Policies...>
         {
 
             static stick::Int32 func(lua_State * _luaState)
@@ -1504,15 +1634,14 @@ namespace luanatic
         static stick::Int32 funcImpl(lua_State * _luaState, index_sequence<N...>)
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), 0);
-
-            Indexer idx(1);
-            Pusher<Ret>::push(_luaState, (*Func)(convert<Args>(_luaState, 1 + N)...));
+            typename GetPolicy<ph::Result, Keep<ph::Result>, Policies...>::Policy returnPolicy;
+            Pusher<Ret>::push(_luaState, (*Func)(convert<Args>(_luaState, 1 + N)...), returnPolicy);
             return 1;
         }
                 };
 
-        template <class... Args, void (*Func)(Args...)>
-        struct FunctionWrapper<void(*)(Args...), Func>
+        template <class... Args, void (*Func)(Args...), class...Policies>
+        struct FunctionWrapper<void(*)(Args...), Func, Policies...>
         {
             static stick::Int32 func(lua_State * _luaState)
         {
@@ -1528,8 +1657,8 @@ namespace luanatic
         }
                 };
 
-        template <class Ret, class C, class... Args, Ret (C::*Func)(Args...)>
-        struct FunctionWrapper<Ret (C::*)(Args...), Func>
+        template <class Ret, class C, class... Args, Ret (C::*Func)(Args...), class...Policies>
+        struct FunctionWrapper<Ret (C::*)(Args...), Func, Policies...>
         {
             static stick::Int32 func(lua_State * _luaState)
         {
@@ -1541,13 +1670,14 @@ namespace luanatic
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), -1); // - 1 for self
             C * obj = convertToTypeAndCheck<typename RawType<C>::Type>(_luaState, 1);
-            Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...));
+            typename GetPolicy<ph::Result, Keep<ph::Result>, Policies...>::Policy returnPolicy;
+            Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...), returnPolicy);
             return 1;
         }
                 };
 
-        template <class Ret, class C, class... Args, Ret (C::*Func)(Args...) const>
-        struct FunctionWrapper<Ret (C::*)(Args...) const, Func>
+        template <class Ret, class C, class... Args, Ret (C::*Func)(Args...) const, class...Policies>
+        struct FunctionWrapper<Ret (C::*)(Args...) const, Func, Policies...>
         {
 
             static stick::Int32 func(lua_State * _luaState)
@@ -1560,13 +1690,14 @@ namespace luanatic
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), -1); // - 1 for self
             C * obj = convertToTypeAndCheck<typename RawType<C>::Type>(_luaState, 1);
-            Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...));
+            typename GetPolicy<ph::Result, Keep<ph::Result>, Policies...>::Policy returnPolicy;
+            Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...), returnPolicy);
             return 1;
         }
                 };
 
-        template <class C, class... Args, void (C::*Func)(Args...)>
-        struct FunctionWrapper<void (C::*)(Args...), Func>
+        template <class C, class... Args, void (C::*Func)(Args...), class...Policies>
+        struct FunctionWrapper<void (C::*)(Args...), Func, Policies...>
         {
 
             static stick::Int32 func(lua_State * _luaState)
@@ -1584,8 +1715,8 @@ namespace luanatic
         }
                 };
 
-        template <class C, class... Args, void (C::*Func)(Args...) const>
-        struct FunctionWrapper<void (C::*)(Args...) const, Func>
+        template <class C, class... Args, void (C::*Func)(Args...) const, class...Policies>
+        struct FunctionWrapper<void (C::*)(Args...) const, Func, Policies...>
         {
 
             static stick::Int32 func(lua_State * _luaState)
@@ -1654,15 +1785,11 @@ namespace luanatic
 
                 if (lua_gettop(_luaState) == 1)
                 {
-                    //printf("GET ATTRIBUTE\n");
-                    //no arguments, so get
-                    //pushValueType<Ret>(_luaState, obj->*Member);
                     AttributePusher<Ret>::push(_luaState, obj->*Member);
                     return 1;
                 }
                 else
                 {
-                    //printf("SET ATTRIBUTE\n");
                     obj->*Member = convertToValueTypeAndCheck<Ret>(_luaState, 2);
                     return 0;
                 }
@@ -1786,6 +1913,19 @@ namespace luanatic
             pushUnregisteredType<Iterator>(_luaState, _end);
             RangeFunctionPusher<Iterator, ForceReference>::push(_luaState);
         }
+
+
+        template<class F, bool ForceReference>
+        struct ReturnIteratorImpl
+        {
+            using Target = F;
+
+            template<class T>
+            void apply(lua_State * _luaState, T * _obj) const
+            {
+                pushRange<ForceReference>(_luaState, _obj->begin(), _obj->end());
+            }
+        };
 
         template<class T, T Func, bool ForceReference>
         struct IteratorWrapper;
@@ -2002,8 +2142,8 @@ namespace luanatic
             return getChild(_key);
         }
 
-        template <class T, class OwnershipPolicy = detail::KeepOwnership>
-        void set(const T & _value, const OwnershipPolicy & _policy = OwnershipPolicy())
+        template <class T, class Policy = Keep<ph::Result> >
+        void set(const T & _value, const Policy & _policy = Policy())
         {
             STICK_ASSERT(m_state);
             if (m_parentTableIndex != LUA_NOREF)
@@ -2592,6 +2732,25 @@ namespace luanatic
 
             return 0;
         }
+
+        // static int luanaticCast(lua_State * _state)
+        // {
+        //     if(lua_istable(_state, 1) && lua_isuserdata(_state, 2))
+        //     {
+        //         lua_getfield(_state, 1, "__typeID") // 1 2 tid
+        //         if(!lua_isnil(_state, -1))
+        //         {
+        //             if(lua_getmetatable(_state, 2)) // 1 2 tid mt
+        //             {
+        //                 lua_getfield(_state, -1, "__typeID") // 1 2 tid mt tid2
+        //                 if(!lua_isnil(_state, -1))
+        //                 {
+        //                     if(lua_touserdata(_state, -1) == lua_touserdata)
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
     }
 
     inline lua_State * createLuaState()

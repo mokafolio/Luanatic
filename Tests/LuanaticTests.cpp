@@ -13,6 +13,7 @@ struct TestClass
     TestClass(Int32 _val) :
         val(_val)
     {
+
         printf("TestClass\n");
     }
 
@@ -242,6 +243,72 @@ static void setStaticFlat()
     bStaticFlag = true;
 }
 
+struct Base
+{
+    virtual ~Base() {};
+    virtual Int32 number() const = 0;
+};
+
+struct Derived : public Base
+{
+    Int32 number() const
+    {
+        return 3;
+    }
+
+    Int32 yoyo() const
+    {
+        return 4;
+    }
+};
+
+struct Factory
+{
+    Base * makeBase()
+    {
+        return defaultAllocator().create<Derived>();
+    }
+
+    Derived * castToDerived(Base * _b)
+    {
+        return static_cast<Derived *>(_b);
+    }
+};
+
+struct FirstFlag {};
+struct SecondFlag {};
+struct ThirdFlag {};
+
+struct EmptyPolicy
+{
+    static void print()
+    {
+        printf("EmptyPolicy\n");
+    }
+};
+
+template<class W>
+struct DefaultPolicy
+{
+    using Target = W;
+
+    static void print()
+    {
+        printf("DefaultPolicy\n");
+    }
+};
+
+template<class W>
+struct AnotherPolicy
+{
+    using Target = W;
+
+    static void print()
+    {
+        printf("AnotherPolicy\n");
+    }
+};
+
 const Suite spec[] =
 {
     SUITE("Basic Tests")
@@ -347,7 +414,7 @@ const Suite spec[] =
         lua_close(state);
     },
     SUITE("Basic Class Tests")
-    {   
+    {
         lua_State * state = luanatic::createLuaState();
         {
             luanatic::openStandardLibraries(state);
@@ -368,7 +435,7 @@ const Suite spec[] =
 
             EXPECT(TestClass::s_destructionCounter == 0);
             auto obj = defaultAllocator().create<TestClass>(3);
-            globals["someVariable"].set(obj, luanatic::detail::TransferOwnership());
+            globals["someVariable"].set(obj, luanatic::Transfer<luanatic::ph::Result>());
 
             EXPECT(TestClass::s_destructionCounter == 0);
             String luaCode = "local anotherVar = TestClass.new(1)\n"
@@ -453,6 +520,41 @@ const Suite spec[] =
                              "dvar:doubleABy(20.0) print('pre assert') assert(math.abs(dvar.a - 2.0) < epsilon) print('post assert')\n"
                              "printA(dvar)\n";
 
+            auto err = luanatic::execute(state, luaCode);
+            if (err)
+                printf("%s\n", err.message().cString());
+            EXPECT(!err);
+        }
+        {
+            using namespace luanatic;
+            LuaValue globals = luanatic::globalsTable(state);
+
+            ClassWrapper<Base> bw("Base");
+            bw.
+            addMemberFunction("number", LUANATIC_FUNCTION(&Base::number));
+
+            ClassWrapper<Derived> dw("Derived");
+            dw.
+            addBase<Base>().
+            addMemberFunction("yoyo", LUANATIC_FUNCTION(&Derived::yoyo));
+
+            ClassWrapper<Factory> fw("Factory");
+            fw.
+            addConstructor<>("new").
+            addMemberFunction("makeBase", LUANATIC_FUNCTION(&Factory::makeBase, Transfer<ph::Result>)).
+            addMemberFunction("castToDerived", LUANATIC_FUNCTION(&Factory::castToDerived, Transfer<ph::Result>, Transfer<ph::One>));
+
+            globals.
+            registerClass(bw).
+            registerClass(dw).
+            registerClass(fw);
+
+            String luaCode = "local factory = Factory.new()\n"
+                             "local base = factory:makeBase()\n"
+                             "assert(base:number() == 3.0)\n"
+                             "local derived = factory:castToDerived(base)\n"
+                             "assert(derived:number() == 3.0)\n"
+                             "assert(derived:yoyo() == 4.0)\n";
             auto err = luanatic::execute(state, luaCode);
             if (err)
                 printf("%s\n", err.message().cString());
