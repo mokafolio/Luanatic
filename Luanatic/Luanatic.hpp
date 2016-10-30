@@ -1224,6 +1224,73 @@ namespace luanatic
 
     namespace ph = placeHolders;
 
+    namespace detail
+    {
+        template <class T>
+        struct RawType
+        {
+            using Type = typename std::remove_cv<typename std::remove_pointer<
+                         typename std::remove_reference<T>::type>::type>::type;
+        };
+
+        template <class T, class Enable = void>
+        struct Pusher;
+
+        template<>
+        struct Pusher<void *>
+        {
+            static void push(lua_State * _luaState, void * _val)
+            {
+                lua_pushlightuserdata(_luaState, _val);
+            }
+        };
+
+        template <class T>
+        struct Pusher<T *>
+        {
+            static void push(lua_State * _luaState, T * _val)
+            {
+                luanatic::push<typename RawType<T>::Type>(_luaState, _val, false);
+            }
+        };
+
+        template <class T>
+        struct Pusher<T &>
+        {
+            static void push(lua_State * _luaState, T & _val)
+            {
+                luanatic::push<typename RawType<T>::Type>(_luaState, &_val, false);
+            }
+        };
+
+        template <class T>
+        struct Pusher<const T &>
+        {
+            static void push(lua_State * _luaState, const T & _val)
+            {
+                luanatic::pushValueType<typename RawType<T>::Type>(_luaState, _val);
+            }
+        };
+
+        template <class T>
+        struct Pusher<T>
+        {
+            static void push(lua_State * _luaState, T _val)
+            {
+                luanatic::pushValueType<typename RawType<T>::Type>(_luaState, _val);
+            }
+        };
+
+        // this is a specialization for char arrays to push them as a string ...
+        template <stick::Size N>
+        struct Pusher<char[N]>
+        {
+            static void push(lua_State * _luaState, const char _val[N])
+            {
+                lua_pushstring(_luaState, _val);
+            }
+        };
+    }
 
     template<class F>
     struct Keep
@@ -1231,9 +1298,9 @@ namespace luanatic
         using Target = F;
 
         template<class T>
-        void apply(lua_State * _luaState, T * _obj) const
+        void push(lua_State * _luaState, T && _val)
         {
-            luanatic::push<T>(_luaState, _obj, false);
+            detail::Pusher<T>::push(_luaState, std::forward<T>(_val));
         }
     };
 
@@ -1243,9 +1310,16 @@ namespace luanatic
         using Target = F;
 
         template<class T>
-        void apply(lua_State * _luaState, T * _obj) const
+        void push(lua_State * _luaState, T && _val)
         {
-            luanatic::push<T>(_luaState, _obj, true);
+            detail::Pusher<T>::push(_luaState, std::forward<T>(_val));
+        }
+
+        //transfer only applies to pointer/heap allocated objects
+        template<class T>
+        void push(lua_State * _luaState, T * _obj) const
+        {
+            luanatic::push<typename detail::RawType<T>::Type>(_luaState, _obj, true);
         }
     };
 
@@ -1286,13 +1360,6 @@ namespace luanatic
 
         template <class T, class Enable = void>
         struct Converter;
-
-        template <class T>
-        struct RawType
-        {
-            using Type = typename std::remove_cv<typename std::remove_pointer<
-                         typename std::remove_reference<T>::type>::type>::type;
-        };
 
         template <>
         struct Converter<void *>
@@ -1441,73 +1508,6 @@ namespace luanatic
         //     }
         // };
 
-        template <class T, class Enable = void>
-        struct Pusher;
-
-        template<>
-        struct Pusher<void *>
-        {
-            template <class Policy = Keep<ph::Result>>
-            static void push(lua_State * _luaState, void * _val, const Policy & _policy = Policy())
-            {
-                lua_pushlightuserdata(_luaState, _val);
-            }
-        };
-
-        template <class T>
-        struct Pusher<T *>
-        {
-            template <class Policy = Keep<ph::Result>>
-            static void push(lua_State * _luaState, T * _val, const Policy & _policy = Policy())
-            {
-                // for pointers, we acknowledge the ownership policy
-                _policy.template apply<typename RawType<T>::Type>(_luaState, _val);
-            }
-        };
-
-        template <class T>
-        struct Pusher<T &>
-        {
-            template <class Policy = Keep<ph::Result>>
-            static void push(lua_State * _luaState, T & _val, const Policy & _policy = Policy())
-            {
-                // ownership policy does not apply for references or value types
-                luanatic::push<typename RawType<T>::Type>(_luaState, &_val, false);
-            }
-        };
-
-        template <class T>
-        struct Pusher<const T &>
-        {
-            template <class Policy = Keep<ph::Result>>
-            static void push(lua_State * _luaState, const T & _val, const Policy & _policy = Policy())
-            {
-                luanatic::pushValueType<typename RawType<T>::Type>(_luaState, _val);
-            }
-        };
-
-        template <class T>
-        struct Pusher<T>
-        {
-            template <class Policy = Keep<ph::Result>>
-            static void push(lua_State * _luaState, T _val, const Policy & _policy = Policy())
-            {
-                // ownership policy does not apply for value types
-                luanatic::pushValueType<typename RawType<T>::Type>(_luaState, _val);
-            }
-        };
-
-        // this is a specialization for char arrays to push them as a string ...
-        template <stick::Size N>
-        struct Pusher<char[N]>
-        {
-            template <class Policy = Keep<ph::Result>>
-            static void push(lua_State * _luaState, const char _val[N], const Policy & _policy = Policy())
-            {
-                lua_pushstring(_luaState, _val);
-            }
-        };
-
         inline bool checkArgumentCount(lua_State * _luaState,
                                        stick::UInt32 _targetCount,
                                        stick::UInt32 _luaArgCountAdjust,
@@ -1635,7 +1635,8 @@ namespace luanatic
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), 0);
             typename GetPolicy<ph::Result, Keep<ph::Result>, Policies...>::Policy returnPolicy;
-            Pusher<Ret>::push(_luaState, (*Func)(convert<Args>(_luaState, 1 + N)...), returnPolicy);
+            returnPolicy.template push<Ret>(_luaState, (*Func)(convert<Args>(_luaState, 1 + N)...));
+            //Pusher<Ret>::push(_luaState, (*Func)(convert<Args>(_luaState, 1 + N)...), returnPolicy);
             return 1;
         }
                 };
@@ -1671,7 +1672,8 @@ namespace luanatic
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), -1); // - 1 for self
             C * obj = convertToTypeAndCheck<typename RawType<C>::Type>(_luaState, 1);
             typename GetPolicy<ph::Result, Keep<ph::Result>, Policies...>::Policy returnPolicy;
-            Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...), returnPolicy);
+            //Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...), returnPolicy);
+            returnPolicy.template push<Ret>(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...));
             return 1;
         }
                 };
@@ -1691,7 +1693,8 @@ namespace luanatic
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), -1); // - 1 for self
             C * obj = convertToTypeAndCheck<typename RawType<C>::Type>(_luaState, 1);
             typename GetPolicy<ph::Result, Keep<ph::Result>, Policies...>::Policy returnPolicy;
-            Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...), returnPolicy);
+            //Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...), returnPolicy);
+            returnPolicy.template push<Ret>(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...));
             return 1;
         }
                 };
@@ -2158,7 +2161,7 @@ namespace luanatic
                 //push the table key onto the stack
                 lua_pushvalue(m_state, m_keyIndex);
                 //push the new value onto the stack
-                detail::Pusher<T>::push(m_state, _value, _policy);
+                detail::Pusher<T>::push(m_state, _value);
                 //init
                 init();
                 //push the new value onto the stack again
@@ -2171,7 +2174,7 @@ namespace luanatic
             else
             {
                 reset();
-                detail::Pusher<T>::push(m_state, _value, _policy);
+                detail::Pusher<T>::push(m_state, _value);
                 //create the reference, determine type and pop value
                 init();
             }
