@@ -1238,14 +1238,6 @@ namespace luanatic
                          typename std::remove_reference<T>::type>::type>::type;
         };
 
-        // template <class T>
-        // struct RemoveRefFromPtr
-        // {
-        //     using WithoutRef = typename std::remove_reference<T>::type;
-        //     using Type = typename std::conditional<std::is_reference<T>::value,
-        //           typename std::conditional<std::is_pointer<WithoutRef>::value, WithoutRef, T>::type, T>::type;
-        // };
-
         struct NoPolicy {};
 
         template <class P>
@@ -2186,9 +2178,6 @@ namespace luanatic
                 //push the table key onto the stack
                 lua_pushvalue(m_state, m_keyIndex);
                 //push the new value onto the stack
-                //_policy.template push<T>(m_state, std::forward<T>(_value));
-                //detail::ApplyPolicy<T>::apply(m_state, std::forward<T>(_value), _policy);
-                //detail::Pusher<T>::push(m_state, std::forward<T>(_value), _policy);
                 detail::PickPusher<T>::push(m_state, std::forward<T>(_value), _policy);
                 //init
                 init();
@@ -2203,8 +2192,6 @@ namespace luanatic
             {
                 reset();
                 //_policy.template push<T>(m_state, std::forward<T>(_value));
-                //detail::ApplyPolicy<T>::apply(m_state, std::forward<T>(_value), _policy);
-                //detail::Pusher<T>::push(m_state, std::forward<T>(_value), _policy);
                 detail::PickPusher<T>::push(m_state, std::forward<T>(_value), _policy);
                 //create the reference, determine type and pop value
                 init();
@@ -2224,7 +2211,6 @@ namespace luanatic
         LuaValue getChild(K && _key)
         {
             STICK_ASSERT(m_type == LuaType::Table);
-            //detail::Pusher<K>::push(m_state, std::forward<K>(_key), Keep<ph::Result>());
             detail::PickPusher<K>::push(m_state, std::forward<K>(_key), detail::NoPolicy());
             push();
             lua_pushvalue(m_state, -2);
@@ -2426,7 +2412,6 @@ namespace luanatic
             if (ret.type() != LuaType::Table)
             {
                 ret.reset(); //need to reset to pop the key off the stack.
-                //detail::Pusher<Key>::push(m_state, std::forward<Key>(_key), Keep<ph::Result>()); //key
                 detail::PickPusher<Key>::push(m_state, std::forward<Key>(_key), detail::NoPolicy()); //key
                 stick::Int32 keyIndex = lua_gettop(m_state);
                 push(); //key me
