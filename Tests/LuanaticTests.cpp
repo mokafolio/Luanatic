@@ -590,7 +590,8 @@ const Suite spec[] =
             fw.
             addConstructor<>("new").
             addMemberFunction("makeBase", LUANATIC_FUNCTION(&Factory::makeBase, Transfer<ph::Result>)).
-            addMemberFunction("castToDerived", LUANATIC_FUNCTION(&Factory::castToDerived, Transfer<ph::Result>, Transfer<ph::One>));
+            //Derived * castToDerived(Base * _b)
+            addMemberFunction("castToDerived", LUANATIC_FUNCTION(&Factory::castToDerived, Transfer<ph::Result>));
 
             globals.
             registerClass(bw).
@@ -621,10 +622,8 @@ const Suite spec[] =
             luanatic::initialize(state);
             luanatic::LuaValue globals = luanatic::globalsTable(state);
 
-            printf("WHAAAT\n");
             CustomValueType cvt = {1, 99};
             globals["myVar"].set(cvt);
-            printf("WHAAT2\n");
             String luaCode = "assert(type(myVar) == 'table') assert(myVar[1] == 1) assert(myVar[2] == 99) myVar2 = {66, 23}\n";
 
             auto err = luanatic::execute(state, luaCode);

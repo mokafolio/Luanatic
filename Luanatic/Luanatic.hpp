@@ -33,12 +33,19 @@ LUANATIC_FUNCTION_P, \
 LUANATIC_FUNCTION_P, \
 LUANATIC_FUNCTION_P, \
 LUANATIC_FUNCTION_1)(__VA_ARGS__)
-#define LUANATIC_FUNCTION_OVERLOAD(sig, x) &luanatic::detail::FunctionWrapper<sig, x>::func //to manually specify the signature
+#define LUANATIC_FUNCTION_OVERLOAD_2(sig, x) &luanatic::detail::FunctionWrapper<sig, x>::func
+#define LUANATIC_FUNCTION_OVERLOAD_P(sig, x, ...) &luanatic::detail::FunctionWrapper<sig, x, __VA_ARGS__>::func
+#define LUANATIC_FUNCTION_OVERLOAD(...) LUANATIC_GET_MACRO(__VA_ARGS__, \
+LUANATIC_FUNCTION_OVERLOAD_P, \
+LUANATIC_FUNCTION_OVERLOAD_P, \
+LUANATIC_FUNCTION_OVERLOAD_P, \
+LUANATIC_FUNCTION_OVERLOAD_P, \
+LUANATIC_FUNCTION_OVERLOAD_P, \
+LUANATIC_FUNCTION_OVERLOAD_P, \
+LUANATIC_FUNCTION_OVERLOAD_P, \
+LUANATIC_FUNCTION_OVERLOAD_P, \
+LUANATIC_FUNCTION_OVERLOAD_2)(__VA_ARGS__)
 #define LUANATIC_ATTRIBUTE(x) luanatic::detail::AttributeWrapper<decltype(x), x>::func
-#define LUANATIC_RETURN_ITERATOR(x) luanatic::detail::IteratorWrapper<decltype(x), x, false>::func
-#define LUANATIC_RETURN_REF_ITERATOR(x) luanatic::detail::IteratorWrapper<decltype(x), x, true>::func
-#define LUANATIC_RETURN_ITERATOR_OVERLOAD(sig, x) luanatic::detail::IteratorWrapper<sig, x, false>::func
-#define LUANATIC_RETURN_REF_ITERATOR_OVERLOAD(sig, x) luanatic::detail::IteratorWrapper<sig, x, true>::func
 
 namespace luanatic
 {
@@ -1073,7 +1080,6 @@ namespace luanatic
         {
             if (_bLuaOwnsObject)
             {
-                printf("OWNED BY LUA\n");
                 lua_getfield(_luaState, LUA_REGISTRYINDEX, LUANATIC_KEY); // glua
                 lua_getfield(_luaState, -1, "weakTable");                 // glua glua.weakTable
                 lua_remove(_luaState, -2);                                // glua.weakTable
@@ -1144,7 +1150,6 @@ namespace luanatic
             }
             else
             {
-                printf("NOT OWNED BY LUA\n");
                 detail::LuanaticState * glua = detail::luanaticState(_luaState);
                 STICK_ASSERT(glua != nullptr);
 
@@ -1310,7 +1315,6 @@ namespace luanatic
             template<class Policy>
             static void push(lua_State * _luaState, T * _val, const Policy & _policy = Policy())
             {
-                printf("PUSH PTR\n");
                 ApplyPolicyPtr<Policy>::apply(_luaState, _val, _policy);
             }
         };
@@ -1333,7 +1337,6 @@ namespace luanatic
             template<class Policy>
             static void push(lua_State * _luaState, const T & _val, const Policy & _policy = Policy())
             {
-                printf("PUSH CONST REF TYPE\n");
                 ApplyPolicyValueType<Policy>::apply(_luaState, _val, _policy);
             }
         };
@@ -1344,7 +1347,6 @@ namespace luanatic
             template<class Policy>
             static void push(lua_State * _luaState, const T & _val, const Policy & _policy = Policy())
             {
-                printf("PUSH VALUE TYPE\n");
                 ApplyPolicyValueType<Policy>::apply(_luaState, _val, _policy);
             }
         };
@@ -1356,7 +1358,6 @@ namespace luanatic
             template<class Policy>
             static void push(lua_State * _luaState, const char (&_val)[N], const Policy & _policy = Policy())
         {
-            printf("PUSH C STING\n");
             lua_pushstring(_luaState, _val);
         }
                     };
@@ -1972,61 +1973,6 @@ namespace luanatic
             pushUnregisteredType<Iterator>(_luaState, _end);
             RangeFunctionPusher<Iterator, ForceReference>::push(_luaState);
         }
-
-        template<class F, bool ForceReference>
-        struct ReturnIteratorImpl
-        {
-            using Target = F;
-
-            template<class T>
-            void apply(lua_State * _luaState, T * _obj) const
-            {
-                pushRange<ForceReference>(_luaState, _obj->begin(), _obj->end());
-            }
-        };
-
-        template<class T, T Func, bool ForceReference>
-        struct IteratorWrapper;
-
-        template<class Ret, Ret(Func)(void), bool ForceReference>
-        struct IteratorWrapper<Ret(*)(void), Func, ForceReference>
-        {
-            static stick::Int32 func(lua_State * _luaState)
-        {
-            Ret container = Func();
-            pushRange<ForceReference>(_luaState, container.begin(), container.end());
-
-            return 1;
-        }
-        };
-
-        template<class Ret, class C, Ret(C::*Func)(void)const, bool ForceReference>
-        struct IteratorWrapper<Ret(C::*)(void)const, Func, ForceReference>
-        {
-            static stick::Int32 func(lua_State * _luaState)
-        {
-            C * obj = convertToTypeAndCheck<C>(_luaState, 1);
-            Ret container = (obj->*Func)();
-
-            pushRange<ForceReference>(_luaState, container.begin(), container.end());
-
-            return 1;
-        }
-        };
-
-        template<class Ret, class C, Ret(C::*Func)(void), bool ForceReference>
-        struct IteratorWrapper<Ret(C::*)(void), Func, ForceReference>
-        {
-            static stick::Int32 func(lua_State * _luaState)
-        {
-            C * obj = convertToTypeAndCheck<C>(_luaState, 1);
-            Ret container = (obj->*Func)();
-
-            pushRange<ForceReference>(_luaState, container.begin(), container.end());
-
-            return 1;
-        }
-        };
     }
 
     template<class G>
