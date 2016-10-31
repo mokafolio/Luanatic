@@ -309,10 +309,58 @@ struct AnotherPolicy
     }
 };
 
+template<class T>
+struct Bar;
+
+template<class T>
+struct Bar<T *>
+{
+    static void print(T * _arg)
+    {
+        printf("POINTER\n");
+    }
+};
+
+template<class T>
+struct Bar<T &>
+{
+    static void print(T & _arg)
+    {
+        printf("REF\n");
+    }
+};
+
+template<class T>
+struct Bar<const T &>
+{
+    static void print(const T & _arg)
+    {
+        printf("CONST REF\n");
+    }
+};
+
+template<std::size_t N>
+struct Bar<const char(&)[N]>
+{
+    static void print(const char (&_arg)[N])
+    {
+        printf("C STRING\n");
+    }
+};
+
+template<class T>
+void func(T && _element)
+{
+    Bar<T>::print(std::forward<T>(_element));
+}
+
 const Suite spec[] =
 {
     SUITE("Basic Tests")
     {
+        func("test");
+        if (std::is_pointer<TestClass ***&>::value)
+            printf("WE GOT A POIIIINTER\n");
         lua_State * state = luanatic::createLuaState();
         EXPECT(lua_gettop(state) == 0);
         {
@@ -340,21 +388,21 @@ const Suite spec[] =
             EXPECT(globals["test"].get<Float32>() == 1.5f);
 
             val.set("String bro");
-            EXPECT(val.get<String>() == "String bro");
-            val.reset();
-            printf("TOP2 %i\n", lua_gettop(state));
-            EXPECT(lua_gettop(state) == 0);
+            // EXPECT(val.get<String>() == "String bro");
+            // val.reset();
+            // printf("TOP2 %i\n", lua_gettop(state));
+            // EXPECT(lua_gettop(state) == 0);
 
-            luanatic::LuaValue testTable = globals.findOrCreateTable("testTable");
-            EXPECT(testTable.type() == luanatic::LuaType::Table);
-            EXPECT(globals.childCount() == 2);
+            // luanatic::LuaValue testTable = globals.findOrCreateTable("testTable");
+            // EXPECT(testTable.type() == luanatic::LuaType::Table);
+            // EXPECT(globals.childCount() == 2);
 
-            luanatic::LuaValue testTableRef2 = globals.getChild("testTable");
-            EXPECT(testTableRef2.type() == luanatic::LuaType::Table);
-            EXPECT(testTable.childCount() == 0);
-            testTable["blubb"].set(5.0f);
-            EXPECT(testTableRef2["blubb"].get<Float32>() == 5.0f);
-            EXPECT(testTable.childCount() == 1);
+            // luanatic::LuaValue testTableRef2 = globals.getChild("testTable");
+            // EXPECT(testTableRef2.type() == luanatic::LuaType::Table);
+            // EXPECT(testTable.childCount() == 0);
+            // testTable["blubb"].set(5.0f);
+            // EXPECT(testTableRef2["blubb"].get<Float32>() == 5.0f);
+            // EXPECT(testTable.childCount() == 1);
         }
         EXPECT(lua_gettop(state) == 0);
         {
@@ -434,7 +482,7 @@ const Suite spec[] =
             globals.registerClass(tw);
 
             EXPECT(TestClass::s_destructionCounter == 0);
-            auto obj = defaultAllocator().create<TestClass>(3);
+            TestClass * obj = defaultAllocator().create<TestClass>(3);
             globals["someVariable"].set(obj, luanatic::Transfer<luanatic::ph::Result>());
 
             EXPECT(TestClass::s_destructionCounter == 0);
@@ -573,8 +621,10 @@ const Suite spec[] =
             luanatic::initialize(state);
             luanatic::LuaValue globals = luanatic::globalsTable(state);
 
+            printf("WHAAAT\n");
             CustomValueType cvt = {1, 99};
             globals["myVar"].set(cvt);
+            printf("WHAAT2\n");
             String luaCode = "assert(type(myVar) == 'table') assert(myVar[1] == 1) assert(myVar[2] == 99) myVar2 = {66, 23}\n";
 
             auto err = luanatic::execute(state, luaCode);
@@ -598,7 +648,7 @@ const Suite spec[] =
             luanatic::initialize(state);
             luanatic::LuaValue globals = luanatic::globalsTable(state);
 
-            globals.registerFunction("numbers", LUANATIC_RETURN_ITERATOR(&numbers));
+            globals.registerFunction("numbers", LUANATIC_FUNCTION(&numbers, luanatic::ReturnIterator<luanatic::ph::Result>));
             globals.registerFunction("numbersCopy", LUANATIC_FUNCTION(&numbersCopy));
             //check if the number sequence iteration works as expected
             String luaCode = "local i = 1 for obj in numbers() do assert(obj == i*2) i = i + 1 end\n"
