@@ -673,15 +673,15 @@ namespace luanatic
             auto it = _luanaticState.m_typeIDClassMap.find(_tid);
             if (it != _luanaticState.m_typeIDClassMap.end())
             {
-                auto & casts = _luanaticState.m_typeIDClassMap[_tid].wrapper->m_casts;
-                auto it = casts.begin();
+                auto & casts = (*it).value.wrapper->m_casts;
+                auto sit = casts.begin();
 
-                for (; it != casts.end(); ++it)
+                for (; sit != casts.end(); ++sit)
                 {
-                    if ((*it).m_typeID == stick::TypeInfoT<T>::typeID())
+                    if ((*sit).m_typeID == stick::TypeInfoT<T>::typeID())
                         return true;
 
-                    ret = checkBases<T>(_luanaticState, (*it).m_typeID);
+                    ret = checkBases<T>(_luanaticState, (*sit).m_typeID);
                     if (ret)
                         break;
                 }
@@ -852,9 +852,6 @@ namespace luanatic
             //register static functions in class table
             registerFunctions(_state, classTable, _wrapper.m_statics);
 
-            //TODO: is this still needed?
-            //if yes, lets replace integer with light userdata to make sure
-            //the integer is big enough to store a type id (which is a void*)
             lua_pushliteral(_state, "__typeID");            // ... CT __typeID
             lua_pushlightuserdata(_state, myTypeID);        // ... CT __typeID id
             lua_settable(_state, classTable);               // ... CT
@@ -990,7 +987,9 @@ namespace luanatic
                 lua_getfield(_luaState, -1, "__typeID");
                 stick::TypeID tid = (stick::TypeID)lua_touserdata(_luaState, -1);
                 if (tid == stick::TypeInfoT<T>::typeID())
+                {
                     ret = true;
+                }
 
                 if (!ret && !_bStrict)
                 {
@@ -1017,7 +1016,7 @@ namespace luanatic
             {
                 return static_cast<T *>(pud->m_data);
             }
-            if (!_bStrict && std::is_polymorphic<T>())
+            if (!_bStrict)
             {
                 detail::LuanaticState * glua = detail::luanaticState(_luaState);
                 STICK_ASSERT(glua != nullptr);
@@ -1037,7 +1036,6 @@ namespace luanatic
     inline T * convertToTypeAndCheck(lua_State * _luaState, stick::Int32 _index, bool _bStrict)
     {
         T * ret = convertToType<T>(_luaState, _index, _bStrict);
-
         if (!ret)
         {
             detail::LuanaticState * glua = detail::luanaticState(_luaState);
@@ -1312,16 +1310,15 @@ namespace luanatic
         };
 
         // We need to do an overload using std::ref
-        // template <class T>
-        // struct Pusher<T &>
-        // {
-        //     template<class Policy>
-        //     static void push(lua_State * _luaState, T & _val, const Policy & _policy = Policy())
-        //     {
-        //         printf("PUSH REF\n");
-        //         luanatic::push<typename RawType<T>::Type>(_luaState, &_val, false);
-        //     }
-        // };
+        template <class T>
+        struct Pusher<const std::reference_wrapper<T> & >
+        {
+            template<class Policy>
+            static void push(lua_State * _luaState, const std::reference_wrapper<T> & _val, const Policy & _policy = Policy())
+            {
+                luanatic::push<typename RawType<T>::Type>(_luaState, &_val.get(), false);
+            }
+        };
 
         template <class T>
         struct Pusher<const T &>
@@ -1834,7 +1831,6 @@ namespace luanatic
             static stick::Int32 func(lua_State * _luaState)
             {
                 C * obj = convertToTypeAndCheck<C>(_luaState, 1);
-
                 if (lua_gettop(_luaState) == 1)
                 {
                     AttributePusher<Ret>::push(_luaState, obj->*Member);
@@ -1892,8 +1888,8 @@ namespace luanatic
         {
             static void push(lua_State * _luaState, Iterator * _it)
             {
-                typedef typename stick::IteratorTraits<Iterator>::ReferenceType ReferenceType;
-                Pusher<ReferenceType>::push(_luaState, **_it, detail::NoPolicy());
+                typedef typename stick::IteratorTraits<Iterator>::ValueType ValueType;
+                Pusher<const std::reference_wrapper<ValueType> &>::push(_luaState, std::ref(**_it), detail::NoPolicy());
             }
         };
 
