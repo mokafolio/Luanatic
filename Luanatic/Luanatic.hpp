@@ -7,6 +7,7 @@
 #include <Stick/StringConversion.hpp>
 #include <Stick/TypeInfo.hpp>
 #include <Stick/UniquePtr.hpp>
+#include <Stick/Maybe.hpp>
 
 #include <type_traits>
 #include <functional> //for std::ref
@@ -275,7 +276,7 @@ namespace luanatic
         }
     };
 
-    template <typename T>
+    template <class T>
     struct ValueTypeConverter <T, typename std::enable_if<std::is_enum<T>::value>::type >
     {
         static T convertAndCheck(lua_State * _luaState, stick::Int32 _index)
@@ -285,7 +286,7 @@ namespace luanatic
 
         static void push(lua_State * _luaState, const T & _value)
         {
-            lua_pushnumber(_luaState, static_cast<stick::Int32>(_value));
+            lua_pushinteger(_luaState, static_cast<stick::Int32>(_value));
         }
     };
 
@@ -2873,6 +2874,23 @@ namespace luanatic
         lua_setfield(_state, -3, "path");       //package path
         lua_pop(_state, 3);                     //
     }
+
+    template <class T>
+    struct ValueTypeConverter<stick::Maybe<T> >
+    {
+        static bool convertAndCheck(lua_State * _state, stick::Int32 _index)
+        {
+            return detail::Converter<typename stick::Maybe<T>::ValueType>::convert(_state, _index);
+        }
+
+        static void push(lua_State * _state, const stick::Maybe<T> & _value)
+        {
+            if (!_value)
+                lua_pushnil(_state);
+            else
+                detail::Pusher<typename stick::Maybe<T>::ValueType>::push(_state, _value.get());
+        }
+    };
 }
 
 #endif // LUANATIC_LUANATIC_HPP
