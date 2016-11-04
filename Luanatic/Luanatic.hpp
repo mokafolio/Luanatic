@@ -1310,14 +1310,24 @@ namespace luanatic
             }
         };
 
-        // We need to do an overload using std::ref
+        // // We need to do an overload using std::ref
+        // template <class T>
+        // struct Pusher<const std::reference_wrapper<T> & >
+        // {
+        //     template<class Policy>
+        //     static void push(lua_State * _luaState, const std::reference_wrapper<T> & _val, const Policy & _policy = Policy())
+        //     {
+        //         luanatic::push<typename RawType<T>::Type>(_luaState, &_val.get(), false);
+        //     }
+        // };
+
         template <class T>
-        struct Pusher<const std::reference_wrapper<T> & >
+        struct Pusher<T &>
         {
             template<class Policy>
-            static void push(lua_State * _luaState, const std::reference_wrapper<T> & _val, const Policy & _policy = Policy())
+            static void push(lua_State * _luaState, T & _val, const Policy & _policy = Policy())
             {
-                luanatic::push<typename RawType<T>::Type>(_luaState, &_val.get(), false);
+                luanatic::push<typename RawType<T>::Type>(_luaState, &_val, false);
             }
         };
 
@@ -1359,6 +1369,28 @@ namespace luanatic
             static void push(lua_State * _state, T && _value, const Policy & _policy)
             {
                 Pusher<T>::push(_state, std::forward<T>(_value), _policy);
+            }
+        };
+
+        //we forward references as const references by default...
+        template<class T>
+        struct PickPusher<T &>
+        {
+            template<class Policy>
+            static void push(lua_State * _state, const T & _value, const Policy & _policy)
+            {
+                Pusher<const T &>::push(_state, std::forward<const T &>(_value), _policy);
+            }
+        };
+
+        //...unless std::ref is used
+        template<class T>
+        struct PickPusher<const std::reference_wrapper<T> &>
+        {
+            template<class Policy>
+            static void push(lua_State * _state, const std::reference_wrapper<T> & _value, const Policy & _policy)
+            {
+                Pusher<T &>::push(_state, std::forward<T &>(_value.get()), _policy);
             }
         };
 
@@ -2878,17 +2910,17 @@ namespace luanatic
     template <class T>
     struct ValueTypeConverter<stick::Maybe<T> >
     {
-        static bool convertAndCheck(lua_State * _state, stick::Int32 _index)
+        static T convertAndCheck(lua_State * _state, stick::Int32 _index)
         {
-            return detail::Converter<typename stick::Maybe<T>::ValueType>::convert(_state, _index);
+            return detail::Converter<T>::convert(_state, _index);
         }
 
-        static void push(lua_State * _state, const stick::Maybe<T> & _value)
+        static void push(lua_State * _state, stick::Maybe<T> _value)
         {
             if (!_value)
                 lua_pushnil(_state);
             else
-                detail::Pusher<typename stick::Maybe<T>::ValueType>::push(_state, _value.get());
+                detail::Pusher<T>::push(_state, *_value, detail::NoPolicy());
         }
     };
 }
