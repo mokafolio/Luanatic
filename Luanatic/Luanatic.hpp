@@ -1508,9 +1508,8 @@ namespace luanatic
 
                 }
 
-                ReturnProxy(T * _ptr, stick::Allocator * _allocator) :
+                ReturnProxy(T * _ptr) :
                     ptr(_ptr),
-                    allocator(_allocator),
                     ref(*_ptr)
                 {
 
@@ -1518,7 +1517,6 @@ namespace luanatic
 
                 ReturnProxy(ReturnProxy && _other) :
                     ptr(_other.ptr),
-                    allocator(_other.allocator),
                     ref(*ptr)
                 {
                     _other.ptr = nullptr;
@@ -1528,7 +1526,7 @@ namespace luanatic
                 {
                     if (ptr)
                     {
-                        stick::destroy(ptr, *allocator);
+                        stick::destroy(ptr);
                     }
                 }
 
@@ -1541,7 +1539,6 @@ namespace luanatic
                 }
 
                 T * ptr;
-                stick::Allocator * allocator;
                 const T & ref;
             };
 
@@ -1561,7 +1558,7 @@ namespace luanatic
                     LuanaticState * ls = luanaticState(_luaState);
                     STICK_ASSERT(ls);
                     auto ptr = ls->m_allocator->create<T>(convertToValueTypeAndCheck<typename RawType<T>::Type>(_luaState, _index));
-                    return ReturnProxy(ptr, ls->m_allocator);
+                    return ReturnProxy(ptr);
                 }
             }
         };
@@ -1922,7 +1919,7 @@ namespace luanatic
             static void push(lua_State * _luaState, Iterator * _it)
             {
                 typedef typename stick::IteratorTraits<Iterator>::ValueType ValueType;
-                Pusher<const std::reference_wrapper<ValueType> &>::push(_luaState, std::ref(**_it), detail::NoPolicy());
+                Pusher<ValueType&>::push(_luaState, **_it, detail::NoPolicy());
             }
         };
 
@@ -2616,7 +2613,7 @@ namespace luanatic
                 UserData * addr = (UserData *)lua_touserdata(_luaState, 1);
                 if (addr->m_bOwnedByLua)
                 {
-                    stick::destroy(obj, *state->m_allocator);
+                    stick::destroy(obj);
                 }
             }
 
