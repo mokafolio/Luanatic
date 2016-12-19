@@ -2366,7 +2366,7 @@ namespace luanatic
                 lua_getfield(_state, -1, _name.cString());
                 if (!lua_isnil(_state, -1))
                 {
-                    detail::Pass{ (detail::Pusher<Args>::push(_state, std::forward<Args>(_args)),
+                    detail::Pass{ (detail::Pusher<Args>::push(_state, std::forward<Args>(_args), detail::NoPolicy()),
                                    1)... };
                     lua_call(_state, sizeof...(Args), 1);
                 }
