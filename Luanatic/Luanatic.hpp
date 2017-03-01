@@ -11,6 +11,7 @@
 
 #include <type_traits>
 #include <functional> //for std::ref
+#include <tuple>
 #include <cstdint>
 
 extern "C" {
@@ -20,8 +21,8 @@ extern "C" {
 }
 
 #define LUANATIC_KEY "__Luanatic"
-#define LUANATIC_FUNCTION_1(x) luanatic::detail::FunctionWrapper<decltype(x), x>::func
-#define LUANATIC_FUNCTION_P(x, ...) luanatic::detail::FunctionWrapper<decltype(x), x, __VA_ARGS__>::func
+#define LUANATIC_FUNCTION_1(x) {&luanatic::detail::FunctionWrapper<decltype(x), x>::func, luanatic::detail::FunctionWrapper<decltype(x), x>::score}
+#define LUANATIC_FUNCTION_P(x, ...) {&luanatic::detail::FunctionWrapper<decltype(x), x, __VA_ARGS__>::func, luanatic::detail::FunctionWrapper<decltype(x), x, __VA_ARGS__>::score}
 #define LUANATIC_GET_MACRO(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,NAME,...) NAME
 #define LUANATIC_FUNCTION(...) LUANATIC_GET_MACRO(__VA_ARGS__, \
 LUANATIC_FUNCTION_P, \
@@ -34,8 +35,8 @@ LUANATIC_FUNCTION_P, \
 LUANATIC_FUNCTION_P, \
 LUANATIC_FUNCTION_P, \
 LUANATIC_FUNCTION_1)(__VA_ARGS__)
-#define LUANATIC_FUNCTION_OVERLOAD_2(sig, x) &luanatic::detail::FunctionWrapper<sig, x>::func
-#define LUANATIC_FUNCTION_OVERLOAD_P(sig, x, ...) &luanatic::detail::FunctionWrapper<sig, x, __VA_ARGS__>::func
+#define LUANATIC_FUNCTION_OVERLOAD_2(sig, x) {&luanatic::detail::FunctionWrapper<sig, x>::func, &luanatic::detail::FunctionWrapper<sig, x>::score}
+#define LUANATIC_FUNCTION_OVERLOAD_P(sig, x, ...) {&luanatic::detail::FunctionWrapper<sig, x, __VA_ARGS__>::func, &luanatic::detail::FunctionWrapper<sig, x, __VA_ARGS__>::score}
 #define LUANATIC_FUNCTION_OVERLOAD(...) LUANATIC_GET_MACRO(__VA_ARGS__, \
 LUANATIC_FUNCTION_OVERLOAD_P, \
 LUANATIC_FUNCTION_OVERLOAD_P, \
@@ -77,6 +78,9 @@ namespace luanatic
 
     template <class T>
     inline T convertToValueTypeAndCheck(lua_State * _luaState, stick::Int32 _index);
+
+    template <class T>
+    inline stick::Int32 conversionScore(lua_State * _luaState, stick::Int32 _index);
 
     template <class T, class WT>
     inline bool pushWrapped(lua_State * _luaState, const WT * _obj, bool _bLuaOwnsObject = true);
@@ -125,6 +129,10 @@ namespace luanatic
 
     namespace detail
     {
+        //function signature that computes an argument score
+        //based on the current arguments on the stack (for signature matching)
+        typedef stick::Int32 (*ArgScoreFunction) (lua_State *);
+
         inline stick::Size rawLen(lua_State * _state, int _index);
 
         inline lua_Debug debugInfo(lua_State * _state, int _level)
@@ -142,7 +150,32 @@ namespace luanatic
             printf("%s\n\n", lua_tostring(_state, -1));
             luaL_error(_state, _fmt, _args...);
         }
+
+        // returns the raw type of T, removing pointer, reference and
+        // const volatile. This is the behavior we want mainly for
+        // custom registered types.
+        template <class T>
+        struct RawType
+        {
+            using Type = typename std::remove_cv<typename std::remove_pointer<
+                         typename std::remove_reference<T>::type>::type>::type;
+        };
+
+        // for const char *  we don't want to remove const or pointer
+        // as picking proper conversion of these types relies on that
+        // extra information.
+        template <>
+        struct RawType<const char *>
+        {
+            using Type = const char*;
+        };
     }
+
+    struct STICK_API LuanaticFunction
+    {
+        lua_CFunction function;
+        detail::ArgScoreFunction scoreFunction;
+    };
 
     template <class U, class Enable = void>
     struct ValueTypeConverter
@@ -267,7 +300,7 @@ namespace luanatic
         static stick::String convertAndCheck(lua_State * _luaState,
                                              stick::Int32 _index)
         {
-            return static_cast<stick::String>(luaL_checkstring(_luaState, _index));
+            return stick::String(luaL_checkstring(_luaState, _index));
         }
 
         static void push(lua_State * _luaState, const stick::String & _str)
@@ -518,7 +551,7 @@ namespace luanatic
         struct NamedLuaFunction
         {
             stick::String name;
-            lua_CFunction function;
+            LuanaticFunction function;
         };
 
         using NamedLuaFunctionArray = stick::DynamicArray<NamedLuaFunction>;
@@ -557,14 +590,14 @@ namespace luanatic
         virtual ~ClassWrapperBase() {}
 
         ClassWrapperBase & addMemberFunction(const stick::String & _name,
-                                             lua_CFunction _function)
+                                             LuanaticFunction _function)
         {
             m_members.append({ _name, _function });
             return *this;
         }
 
         ClassWrapperBase & addStaticFunction(const stick::String & _name,
-                                             lua_CFunction _function)
+                                             LuanaticFunction _function)
         {
             m_statics.append({ _name, _function });
             return *this;
@@ -573,7 +606,7 @@ namespace luanatic
         ClassWrapperBase & addAttribute(const stick::String & _name,
                                         lua_CFunction _function)
         {
-            m_attributes.append({ _name, _function });
+            m_attributes.append({ _name, {_function, NULL}});
             return *this;
         }
 
@@ -693,11 +726,11 @@ namespace luanatic
 
         struct FindCastFunctionResult
         {
-            bool bFound;
+            stick::Int32 castCount;
             UserData userData;
         };
 
-        inline FindCastFunctionResult findCastFunction(LuanaticState & _luanaticState, const UserData & _currentUserData, stick::TypeID _targetTypeID)
+        inline FindCastFunctionResult findCastFunctionImpl(LuanaticState & _luanaticState, const UserData & _currentUserData, stick::TypeID _targetTypeID, stick::Int32 _depth)
         {
             UserData ret = _currentUserData;
             auto & casts = _luanaticState.m_typeIDClassMap[ret.m_typeID].wrapper->m_casts;
@@ -709,7 +742,7 @@ namespace luanatic
                 ret = (*it).m_cast(_currentUserData, _luanaticState);
                 if (ret.m_typeID == _targetTypeID)
                 {
-                    return { true, ret };
+                    return { _depth, ret };
                 }
             }
 
@@ -719,12 +752,17 @@ namespace luanatic
             for (; it != casts.end(); ++it)
             {
                 ret = (*it).m_cast(_currentUserData, _luanaticState);
-                ret = findCastFunction(_luanaticState, ret, _targetTypeID).userData;
-                if (ret.m_typeID == _targetTypeID)
-                    return { true, ret };
+                auto res = findCastFunctionImpl(_luanaticState, ret, _targetTypeID, _depth + 1);
+                if (res.userData.m_typeID == _targetTypeID)
+                    return res;
             }
 
-            return { false, ret };
+            return { -1, ret };
+        }
+
+        inline FindCastFunctionResult findCastFunction(LuanaticState & _luanaticState, const UserData & _currentUserData, stick::TypeID _targetTypeID)
+        {
+            return findCastFunctionImpl(_luanaticState, _currentUserData, _targetTypeID, 0);
         }
 
         inline void pushGlobalsTable(lua_State * _state)
@@ -746,6 +784,22 @@ namespace luanatic
 #endif // LUA_VERSION_NUM >= 502
         }
 
+        struct STICK_LOCAL FunctionWithSignature
+        {
+            lua_CFunction function;
+            stick::DynamicArray<stick::TypeID> signature;
+        };
+
+        struct STICK_LOCAL OverloadedFunction
+        {
+            stick::DynamicArray<FunctionWithSignature> overloads;
+        };
+
+        struct STICK_LOCAL OverloadedContext
+        {
+
+        };
+
         void registerFunctions(lua_State * _luaState, stick::Int32 _targetTableIndex,
                                const ClassWrapperBase::NamedLuaFunctionArray & _functions,
                                const stick::String & _nameReplace = "",
@@ -763,13 +817,79 @@ namespace luanatic
                 if (lua_isnil(_luaState, -1))
                 {
                     lua_pushstring(_luaState, name); // ... CT mT nil name
-                    lua_pushcfunction(_luaState, (*it).function); // ... CT mT nil name func
+                    lua_pushlightuserdata(_luaState, (void*)(*it).function.scoreFunction);
+                    lua_pushcclosure(_luaState, (*it).function.function, 1); // ... CT mT nil name func
+                    /*const char *  val = lua_getupvalue(_luaState, -1, 1);
+                    printf("UPVALUE %s\n", val);
+                    if (lua_type(_luaState, -1) == LUA_TUSERDATA)
+                        printf("USERDATA BABY\n");
+
+                    ArgScoreFunction fn = (ArgScoreFunction)lua_touserdata(_luaState, -1);
+                    printf("FN %p\n", fn);
+                    if (fn)
+                    {
+                        printf("PRE CALL\n");
+                        auto result = fn(_luaState);
+                        printf("RESULT %i\n", result);
+                    }
+                    lua_pop(_luaState, 1);*/
+
                     lua_settable(_luaState, -4); // ... CT mT nil
                     lua_pop(_luaState, 1); // ... CT mT
                 }
                 else
                 {
-                    // TODO: error
+                    // 01. create a table that holds all the overloads
+                    // 02.
+                    // printf("CREATING OVERLOAD\n");
+                    // auto otherFunc = lua_gettop(_luaState);
+
+                    // //this is the first overload, create a table, copy the existing function to the first index
+                    // //and the new overload to the second
+                    // lua_getfield(_luaState, _targetTableIndex, "__overloads"); // ... CT mT func mT.__overloads
+
+                    // //if there is not __overloads table in the current scope, create one
+                    // if (lua_isnil(_luaState, -1))
+                    // {
+                    //     lua_pop(_luaState, 1);
+                    //     lua_newtable(_luaState);
+                    //     lua_pushvalue(_luaState, -1);
+                    //     lua_setfield(_luaState, -4, "__overloads");
+                    // }
+
+                    // lua_getfield(_luaState, -1, name); // ... CT mT func mT.__overloads mT.__overloads.name
+                    // if (lua_isnil(_luaState, -1)) // ... CT mT func mT.__overloads nil
+                    // {
+                    //     lua_newtable(_luaState); // ... CT mT func mT.__overloads nil {}
+                    //     lua_pushinteger(_luaState, 1); // ... CT mT func mT.__overloads nil {} 1
+                    //     lua_pushvalue(_luaState, otherFunc); // ... CT mT func mT.__overloads nil {} 1 otherFunc
+                    //     lua_settable(_luaState, -3); // ... CT mT func mT.__overloads nil {}
+                    //     lua_pushinteger(_luaState, 2); // ... CT mT func mT.__overloads nil {} 2
+                    //     lua_pushcfunction(_luaState, (*it).function.function); // ... CT mT func mT.__overloads nil {} 2 func
+                    //     /*if (_bNiceConstructor)
+                    //     {
+                    //         lua_pushcclosure(_luaState, callConstructorNice, 1);
+                    //     }*/
+                    //     lua_settable(_luaState, -3); // ... CT mT func mT.__overloads nil {}
+                    //     lua_pushvalue(_luaState, -1); // ... CT mT func mT.__overloads nil {} {}
+                    //     lua_setfield(_luaState, -4, name); // ... CT mT func mT.__overloads nil {}
+                    //     lua_remove(_luaState, -2); // ... CT mT func mT.__overloads {}
+                    // }
+                    // else
+                    // {
+                    //     lua_pushinteger(_luaState, detail::rawLen(_luaState, -1) + 1); // ... CT mT func mT.__overloads mT.__overloads.name i
+                    //     lua_pushcfunction(_luaState, (*it).function); // ... CT mT func mT.__overloads mT.__overloads.name i func
+                    //     /*if (_bNiceConstructor)
+                    //     {
+                    //         lua_pushcclosure(_luaState, callConstructorNice, 1);
+                    //     }*/
+                    //     lua_settable(_luaState, -3); // ... CT mT func mT.__overloads mT.__overloads.name
+                    // }
+
+                    // //push the c closure and set the overloaded
+                    // //lua_pushcclosure(_luaState, callOverloadedFunction, 1); // ... CT mT func mT.__overloads closure
+                    // lua_setfield(_luaState, _targetTableIndex, name); // ... CT mT func mT.__overloads
+                    // lua_pop(_luaState, 2); // ... CT mT
                 }
             }
         }
@@ -870,7 +990,7 @@ namespace luanatic
             lua_pushstring(_state, _wrapper.m_className.cString());
             lua_settable(_state, classTable); // ... CT mT
 
-            //register member functions
+            //register member functions in metatable
             registerFunctions(_state, classTable, _wrapper.m_members);
 
             //destructor
@@ -1007,6 +1127,146 @@ namespace luanatic
         return ret;
     }
 
+    namespace detail
+    {
+        //Note: Lua < 5.3 does not have isinteger function
+#if LUA_VERSION_NUM < 503
+        int lua_isinteger (lua_State * _state, stick::Int32 _index)
+        {
+            if (lua_type(_state, _index) == LUA_TNUMBER)
+            {
+                lua_Number n = lua_tonumber(_state, _index);
+                lua_Integer i = lua_tointeger(_state, _index);
+                if (i == n)
+                    return 1;
+            }
+            return 0;
+        }
+#endif
+
+        //helpers to generate conversion scores for default lua types and basic c++ value types
+        template<class T>
+        struct LuaTypeScore
+        {
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _index)
+            {
+                return std::numeric_limits<stick::Int32>::max();
+            }
+        };
+
+        template<>
+        struct LuaTypeScore<stick::UInt32>
+        {
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _index)
+            {
+                lua_Integer i = lua_tointeger(_luaState, _index);
+                if (lua_isinteger(_luaState, _index) && i >= 0)
+                    return 0;
+                else if (lua_isnumber(_luaState, _index) && i >= 0)
+                    return 1;
+                return std::numeric_limits<stick::Int32>::max();
+            }
+        };
+
+        template<>
+        struct LuaTypeScore<stick::Int32>
+        {
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _index)
+            {
+                if (lua_isinteger(_luaState, _index))
+                    return 0;
+                else if (lua_isnumber(_luaState, _index))
+                    return 1;
+                return std::numeric_limits<stick::Int32>::max();
+            }
+        };
+
+        template<>
+        struct LuaTypeScore<stick::Float32>
+        {
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _index)
+            {
+                if (lua_type(_luaState, _index) == LUA_TNUMBER)
+                {
+                    return 0;
+                }
+                else if (lua_isnumber(_luaState, _index))
+                    return 1;
+                return std::numeric_limits<stick::Int32>::max();
+            }
+        };
+
+        template<>
+        struct LuaTypeScore<stick::Float64>
+        {
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _index)
+            {
+                if (lua_type(_luaState, _index) == LUA_TNUMBER)
+                {
+                    return 0;
+                }
+                else if (lua_isnumber(_luaState, _index))
+                    return 1;
+                return std::numeric_limits<stick::Int32>::max();
+            }
+        };
+
+        template<>
+        struct LuaTypeScore<stick::String>
+        {
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _index)
+            {
+                if (lua_type(_luaState, _index) == LUA_TSTRING)
+                {
+                    return 0;
+                }
+                else if (lua_isstring(_luaState, _index))
+                    return 1;
+                return std::numeric_limits<stick::Int32>::max();
+            }
+        };
+
+        template<>
+        struct LuaTypeScore<const char *>
+        {
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _index)
+            {
+                if (lua_type(_luaState, _index) == LUA_TSTRING)
+                {
+                    return 0;
+                }
+                else if (lua_isstring(_luaState, _index))
+                    return 1;
+                return std::numeric_limits<stick::Int32>::max();
+            }
+        };
+    }
+
+    template <class T>
+    inline stick::Int32 conversionScore(lua_State * _luaState, stick::Int32 _index)
+    {
+        using RT = typename detail::RawType<T>::Type;
+        if (!lua_isuserdata(_luaState, _index))
+        {
+            return detail::LuaTypeScore<RT>::score(_luaState, _index);
+        }
+        else if (isOfType<RT>(_luaState, _index, true))
+        {
+            return 0;
+        }
+        else
+        {
+            detail::UserData * pud = static_cast<detail::UserData *>(lua_touserdata(_luaState, _index));
+            detail::LuanaticState * glua = detail::luanaticState(_luaState);
+            STICK_ASSERT(glua != nullptr);
+            auto cc = detail::findCastFunctionImpl(*glua, *pud, stick::TypeInfoT<RT>::typeID(), 1).castCount;
+            if (cc != -1)
+                return cc;
+            else return std::numeric_limits<stick::Int32>::max();
+        }
+        return std::numeric_limits<stick::Int32>::max();
+    }
+
     template <class T>
     inline T * convertToType(lua_State * _luaState, stick::Int32 _index, bool _bStrict)
     {
@@ -1023,7 +1283,7 @@ namespace luanatic
                 STICK_ASSERT(glua != nullptr);
 
                 auto result = detail::findCastFunction(*glua, *pud, stick::TypeInfoT<T>::typeID());
-                if (result.bFound)
+                if (result.castCount != -1)
                 {
                     return static_cast<T *>(result.userData.m_data);
                 }
@@ -1230,13 +1490,6 @@ namespace luanatic
 
     namespace detail
     {
-        template <class T>
-        struct RawType
-        {
-            using Type = typename std::remove_cv<typename std::remove_pointer<
-                         typename std::remove_reference<T>::type>::type>::type;
-        };
-
         struct NoPolicy {};
 
         template <class P>
@@ -1468,6 +1721,19 @@ namespace luanatic
             }
         };
 
+        // we need a special converter to c string because
+        // otherwise it tries to treat it like any other pointer.
+        template <>
+        struct Converter<const char *>
+        {
+            using Ret = const char*;
+
+            static Ret convert(lua_State * _luaState, stick::Int32 _index)
+            {
+                return luaL_checkstring(_luaState, _index);
+            }
+        };
+
         // Convert to a raw pointer type.
         template <class T>
         struct Converter<T *>
@@ -1692,14 +1958,56 @@ namespace luanatic
             return callFunctionImpl<Ret>(_state, _callable, make_index_sequence<sizeof...(Args)>());
         }
 
+        template<class...Args>
+        struct ArgScore
+        {
+            static stick::Int32 score(lua_State * _luaState)
+            {
+                stick::Int32 ret = 0;
+                scoreImpl(_luaState, ret, make_index_sequence<sizeof...(Args)>());
+                return ret;
+            }
+
+        private:
+
+            template<class Arg>
+            static stick::Int32 scoreHelper(lua_State * _luaState, stick::Int32 _index, stick::Int32 & _outResult)
+            {
+                _outResult += conversionScore<Arg>(_luaState, _index);
+                return _outResult;
+            }
+
+            template<std::size_t...N>
+            static void scoreImpl(lua_State * _luaState, stick::Int32 & _outResult, index_sequence<N...>)
+            {
+                stick::Int32 xs[] = {scoreHelper<Args>(_luaState, 1 + N, _outResult)...};
+            }
+        };
+
         template <class T, T Func, class...Policies>
         struct FunctionWrapper;
 
         template <class Ret, class... Args, Ret (*Func)(Args...), class...Policies>
         struct FunctionWrapper<Ret(*)(Args...), Func, Policies...>
         {
+            static stick::Int32 score(lua_State * _luaState)
+        {
+            return ArgScore<Args...>::score(_luaState);
+        }
 
-            static stick::Int32 func(lua_State * _luaState)
+        template<class Arg>
+        static stick::Int32 scoreHelper(lua_State * _luaState, stick::Int32 _index, stick::Int32 & _outResult)
+        {
+            _outResult += conversionScore<Arg>(_luaState, _index);
+        }
+
+        template<std::size_t...N>
+        static stick::Int32 scoreImpl(lua_State * _luaState, stick::Int32 & _outResult, index_sequence<N...>)
+        {
+            stick::Int32 xs[] = {scoreHelper<Args>(_luaState, 1 + N, _outResult)...};
+        }
+
+        static stick::Int32 func(lua_State * _luaState)
         {
             return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
         }
@@ -1718,7 +2026,13 @@ namespace luanatic
         template <class... Args, void (*Func)(Args...), class...Policies>
         struct FunctionWrapper<void(*)(Args...), Func, Policies...>
         {
-            static stick::Int32 func(lua_State * _luaState)
+
+            static stick::Int32 score(lua_State * _luaState)
+        {
+            return ArgScore<Args...>::score(_luaState);
+        }
+
+        static stick::Int32 func(lua_State * _luaState)
         {
             return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
         }
@@ -1735,7 +2049,12 @@ namespace luanatic
         template <class Ret, class C, class... Args, Ret (C::*Func)(Args...), class...Policies>
         struct FunctionWrapper<Ret (C::*)(Args...), Func, Policies...>
         {
-            static stick::Int32 func(lua_State * _luaState)
+            static stick::Int32 score(lua_State * _luaState)
+        {
+            return ArgScore<Args...>::score(_luaState);
+        }
+
+        static stick::Int32 func(lua_State * _luaState)
         {
             return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
         }
@@ -1757,7 +2076,12 @@ namespace luanatic
         struct FunctionWrapper<Ret (C::*)(Args...) const, Func, Policies...>
         {
 
-            static stick::Int32 func(lua_State * _luaState)
+            static stick::Int32 score(lua_State * _luaState)
+        {
+            return ArgScore<Args...>::score(_luaState);
+        }
+
+        static stick::Int32 func(lua_State * _luaState)
         {
             return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
         }
@@ -1778,8 +2102,12 @@ namespace luanatic
         template <class C, class... Args, void (C::*Func)(Args...), class...Policies>
         struct FunctionWrapper<void (C::*)(Args...), Func, Policies...>
         {
+            static stick::Int32 score(lua_State * _luaState)
+        {
+            return ArgScore<Args...>::score(_luaState);
+        }
 
-            static stick::Int32 func(lua_State * _luaState)
+        static stick::Int32 func(lua_State * _luaState)
         {
             return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
         }
@@ -1797,8 +2125,12 @@ namespace luanatic
         template <class C, class... Args, void (C::*Func)(Args...) const, class...Policies>
         struct FunctionWrapper<void (C::*)(Args...) const, Func, Policies...>
         {
+            static stick::Int32 score(lua_State * _luaState)
+        {
+            return ArgScore<Args...>::score(_luaState);
+        }
 
-            static stick::Int32 func(lua_State * _luaState)
+        static stick::Int32 func(lua_State * _luaState)
         {
             return funcImpl(_luaState, make_index_sequence<sizeof...(Args)>());
         }
@@ -1919,7 +2251,7 @@ namespace luanatic
             static void push(lua_State * _luaState, Iterator * _it)
             {
                 typedef typename stick::IteratorTraits<Iterator>::ValueType ValueType;
-                Pusher<ValueType&>::push(_luaState, **_it, detail::NoPolicy());
+                Pusher<ValueType &>::push(_luaState, **_it, detail::NoPolicy());
             }
         };
 
@@ -2315,8 +2647,24 @@ namespace luanatic
             return *this;
         }
 
+        // @TODO: Not sure if we should keep this overload as
+        // it will break overloading if multiple functions
+        // are registered with the same name. It is useful though to
+        // register hand rolled lua_CFunction functions...hmmm
+        //
+        // Maybe emit a warning/error if there is a function
+        // allready registered with that name that has no score function?
+        //
+        // The reason it breaks overloading is because we don't provide
+        // a score function that is used for signature matching.
         LuaValue & registerFunction(const stick::String & _name,
                                     lua_CFunction _function)
+        {
+            return registerFunction(_name, {_function, NULL});
+        }
+
+        LuaValue & registerFunction(const stick::String & _name,
+                                    LuanaticFunction _function)
         {
             STICK_ASSERT(m_state && m_type == LuaType::Table);
             push();
@@ -2540,7 +2888,7 @@ namespace luanatic
         {
             T * obj = convertToType<T>(_luaState, 1);
 
-            lua_getfield(_luaState, LUA_REGISTRYINDEX, LUANATIC_KEY);             // obj key gT
+            lua_getfield(_luaState, LUA_REGISTRYINDEX, LUANATIC_KEY); // obj key gT
             lua_getfield(_luaState, -1, "storage"); // obj key gT storage
 
             ObjectIdentifier<T>::identify(_luaState,  obj); // obj key gT storage id
@@ -2759,26 +3107,26 @@ namespace luanatic
             return luanaticIsBaseOf(_state);
         }
 
-        static stick::Int32 gluaEnsureClass(lua_State * _state)
-        {
-            /*STICK_ASSERT(lua_isuserdata(_state, 1));
-            STICK_ASSERT(lua_istable(_state, 2));
+        // static stick::Int32 gluaEnsureClass(lua_State * _state)
+        // {
+        //     STICK_ASSERT(lua_isuserdata(_state, 1));
+        //     STICK_ASSERT(lua_istable(_state, 2));
 
-            //This is sort of the fastest way of doing it, but not safe. Should we put more sanity
-            //checks here? hmhmhmhm
-            detail::UserData * userData = static_cast<detail::UserData*>(lua_touserdata(_state, 1));
+        //     //This is sort of the fastest way of doing it, but not safe. Should we put more sanity
+        //     //checks here? hmhmhmhm
+        //     detail::UserData * userData = static_cast<detail::UserData*>(lua_touserdata(_state, 1));
 
-            lua_getfield(_state, 2, "__typeID");
+        //     lua_getfield(_state, 2, "__typeID");
 
-            if((stick::Size)userData->m_typeID != lua_tointeger(_state, -1))
-            {
-                userData->m_typeID = luaL_checkinteger(_state, -1);
-                lua_pop(_state, 1);
-                lua_setmetatable(_state, 1);
-            }*/
+        //     if((stick::Size)userData->m_typeID != lua_tointeger(_state, -1))
+        //     {
+        //         userData->m_typeID = luaL_checkinteger(_state, -1);
+        //         lua_pop(_state, 1);
+        //         lua_setmetatable(_state, 1);
+        //     }
 
-            return 0;
-        }
+        //     return 0;
+        // }
 
         // static int luanaticCast(lua_State * _state)
         // {
@@ -2873,10 +3221,12 @@ namespace luanatic
 
     inline stick::Error execute(lua_State * _state, const stick::String & _luaCode)
     {
-        stick::Int32 result = luaL_dostring(_state, _luaCode.cString());
-        if (result)
-            return stick::Error(stick::ec::InvalidOperation, lua_tostring(_state, -1), STICK_FILE, STICK_LINE);
-
+        if (_luaCode.length())
+        {
+            stick::Int32 result = luaL_dostring(_state, _luaCode.cString());
+            if (result)
+                return stick::Error(stick::ec::InvalidOperation, lua_tostring(_state, -1), STICK_FILE, STICK_LINE);
+        }
         return stick::Error();
     }
 

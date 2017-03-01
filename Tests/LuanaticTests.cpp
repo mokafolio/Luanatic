@@ -1,6 +1,8 @@
 #include <Luanatic/Luanatic.hpp>
 #include <Stick/Test.hpp>
 
+#include <cmath>
+
 using namespace stick;
 
 struct TestClass
@@ -166,6 +168,28 @@ struct D : public A, public B
     Float32 d;
 };
 
+struct E : public CoolClass
+{
+    E()
+    {
+
+    }
+
+    E(Float32 _a, Float32 _b, Float32 _d) :
+        CoolClass(_a, _b),
+        d(_d)
+    {
+
+    }
+
+    virtual ~E()
+    {
+        printf("DESTRUCT D\n");
+    }
+
+    Float32 d;
+};
+
 struct CustomValueType
 {
     Int32 a, b;
@@ -180,6 +204,11 @@ static const DynamicArray<Int32> & numbers()
 static DynamicArray<Int32> numbersCopy()
 {
     return {2, 4, 6, 8, 10, 12};
+}
+
+static void printCString(const char * _str)
+{
+    printf("A C STRING: %s\n", _str);
 }
 
 namespace luanatic
@@ -359,7 +388,7 @@ const Suite spec[] =
     SUITE("Basic Tests")
     {
         func("test");
-        if (std::is_pointer<TestClass ***&>::value)
+        if (std::is_pointer<TestClass ** *& >::value)
             printf("WE GOT A POIIIINTER\n");
         lua_State * state = luanatic::createLuaState();
         EXPECT(lua_gettop(state) == 0);
@@ -624,7 +653,8 @@ const Suite spec[] =
 
             CustomValueType cvt = {1, 99};
             globals["myVar"].set(cvt);
-            String luaCode = "assert(type(myVar) == 'table') assert(myVar[1] == 1) assert(myVar[2] == 99) myVar2 = {66, 23}\n";
+            globals.registerFunction("printCString", LUANATIC_FUNCTION(&printCString));
+            String luaCode = "assert(type(myVar) == 'table') assert(myVar[1] == 1) assert(myVar[2] == 99) myVar2 = {66, 23} printCString(\"TEST YOOO!!!\") \n";
 
             auto err = luanatic::execute(state, luaCode);
             if (err)
@@ -661,6 +691,87 @@ const Suite spec[] =
                 printf("%s\n", err.message().cString());
 
             EXPECT(!err);
+        }
+        EXPECT(lua_gettop(state) == 0);
+        lua_close(state);
+    },
+    SUITE("Overload Prep Tests")
+    {
+        DynamicArray<TypeID> signature;
+        lua_State * state = luanatic::createLuaState();
+        {
+            luanatic::openStandardLibraries(state);
+            luanatic::initialize(state);
+            luanatic::LuaValue globals = luanatic::globalsTable(state);
+
+            luanatic::ClassWrapper<A> aw("A");
+            aw.
+            addConstructor<Float32>("new").
+            addMemberFunction("doubleA", LUANATIC_FUNCTION_OVERLOAD(void(A::*)(void), &A::doubleA)).
+            addMemberFunction("doubleABy", LUANATIC_FUNCTION_OVERLOAD(void(A::*)(Float32), &A::doubleA)).
+            addAttribute("a", LUANATIC_ATTRIBUTE(&A::a));
+
+            luanatic::ClassWrapper<B> bw("B");
+            bw.
+            addConstructor<Float32>("new").
+            addMemberFunction("halfB", LUANATIC_FUNCTION(&B::halfB)).
+            addAttribute("b", LUANATIC_ATTRIBUTE(&B::b));
+
+            luanatic::ClassWrapper<CoolClass> cw("CoolClass");
+            cw.
+            addBase<A>().
+            addConstructor<Float32, Float32>("new").
+            addAttribute("c", LUANATIC_ATTRIBUTE(&CoolClass::c));
+
+            luanatic::ClassWrapper<E> dw("E");
+            dw.
+            addConstructor<Float32, Float32, Float32>("new").
+            addBase<CoolClass>().
+            addAttribute("d", LUANATIC_ATTRIBUTE(&E::d));
+
+            globals.
+            registerClass(aw).
+            registerClass(bw).
+            registerClass(cw).
+            registerClass(dw);
+
+
+            //Test if conversion score works properly for custom types
+            globals["test"].set(E(0.1, 0.2, 0.3));
+            luanatic::LuaValue t = globals["test"];
+            t.push();
+            EXPECT(lua_isuserdata(state, -1));
+            EXPECT(luanatic::conversionScore<A>(state, -1) == 2);
+            printf("DA SCORE %i\n", luanatic::conversionScore<B>(state, -1));
+            EXPECT(luanatic::conversionScore<const B*>(state, -1) == std::numeric_limits<stick::Int32>::max());
+            EXPECT(luanatic::conversionScore<CoolClass&>(state, -1) == 1);
+            EXPECT(luanatic::conversionScore<const E>(state, -1) == 0);
+
+
+            //test conversion scoring for basic types
+            lua_pushinteger(state, 3);
+            EXPECT(luanatic::conversionScore<const B*>(state, -1) == std::numeric_limits<stick::Int32>::max());
+            EXPECT(luanatic::conversionScore<stick::Int32>(state, -1) == 0);
+            EXPECT(luanatic::conversionScore<stick::UInt32>(state, -1) == 0);
+            EXPECT(luanatic::conversionScore<stick::Float32>(state, -1) == 0);
+            
+            lua_pushinteger(state, -9);
+            EXPECT(luanatic::conversionScore<stick::Int32>(state, -1) == 0);
+            EXPECT(luanatic::conversionScore<stick::UInt32>(state, -1) == std::numeric_limits<stick::Int32>::max());
+            
+            lua_pushnumber(state, 3.5);
+            EXPECT(luanatic::conversionScore<stick::Int32>(state, -1) == 1);
+            EXPECT(luanatic::conversionScore<stick::Float32>(state, -1) == 0);
+            EXPECT(luanatic::conversionScore<stick::String>(state, -1) == 1);
+            EXPECT(luanatic::conversionScore<const char *>(state, -1) == 1);
+
+            lua_pushstring(state, "3.5");
+            EXPECT(luanatic::conversionScore<stick::Float32>(state, -1) == 1);
+            EXPECT(luanatic::conversionScore<stick::Float64>(state, -1) == 1);
+            EXPECT(luanatic::conversionScore<stick::String>(state, -1) == 0);
+            EXPECT(luanatic::conversionScore<const char *>(state, -1) == 0);
+
+            lua_pop(state, 5);
         }
         EXPECT(lua_gettop(state) == 0);
         lua_close(state);
