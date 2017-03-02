@@ -389,6 +389,11 @@ Int32 overloadedFunction(Int32 _a, UInt32 _b)
     return _a + _b;
 }
 
+Float32 overloadedFunction(Float32 _a, Float32 _b)
+{
+    return _a + _b;
+}
+
 const char * overloadedFunction(const char * _str)
 {
     return _str;
@@ -797,6 +802,7 @@ const Suite spec[] =
 
             globals.registerFunction("overloadedFunction", LUANATIC_FUNCTION_OVERLOAD(Int32(*)(Int32, UInt32), &overloadedFunction));
             globals.registerFunction("overloadedFunction", LUANATIC_FUNCTION_OVERLOAD(const char * (*)(const char *), &overloadedFunction));
+            //globals.registerFunction("overloadedFunction", LUANATIC_FUNCTION_OVERLOAD(Float32 (*)(Float32, Float32), &overloadedFunction));
 
             String luaCode = "local a = overloadedFunction(1, 2)\n"
                              "assert(a == 3)\n"

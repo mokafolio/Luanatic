@@ -800,7 +800,7 @@ namespace luanatic
             {
                 stick::Int32 score = (*it).scoreFunction(_luaState, argCount);
                 printf("Score %i\n", score);
-                if (score == bestScore)
+                if (score != std::numeric_limits<stick::Int32>::max()  && score == bestScore)
                 {
                     candidates.append(*it);
                 }
@@ -814,13 +814,15 @@ namespace luanatic
 
             if (!candidates.count())
             {
-                lua_pushstring(_luaState, "Could not find candidate for overloaded function\n");
-                lua_error(_luaState);
+                //lua_pushstring(_luaState, "Could not find candidate for overloaded function\n");
+                //lua_error(_luaState);
+                luaErrorWithStackTrace(_luaState, 1, "Could not find candidate for overloaded function.");
             }
             else if(candidates.count() > 1)
             {
-                lua_pushstring(_luaState, "Ambiguous call to overloaded function.\n");
-                lua_error(_luaState);
+                //lua_pushstring(_luaState, "Ambiguous call to overloaded function.\n");
+                //lua_error(_luaState);
+                luaErrorWithStackTrace(_luaState, 1, "Ambiguous call to overloaded function.");
             }
             else
             {
