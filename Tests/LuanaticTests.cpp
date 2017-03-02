@@ -383,6 +383,17 @@ void func(T && _element)
     Bar<T>::print(std::forward<T>(_element));
 }
 
+//for overload testing
+Int32 overloadedFunction(Int32 _a, UInt32 _b)
+{
+    return _a + _b;
+}
+
+const char * overloadedFunction(const char * _str)
+{
+    return _str;
+}
+
 const Suite spec[] =
 {
     SUITE("Basic Tests")
@@ -743,22 +754,22 @@ const Suite spec[] =
             EXPECT(lua_isuserdata(state, -1));
             EXPECT(luanatic::conversionScore<A>(state, -1) == 2);
             printf("DA SCORE %i\n", luanatic::conversionScore<B>(state, -1));
-            EXPECT(luanatic::conversionScore<const B*>(state, -1) == std::numeric_limits<stick::Int32>::max());
-            EXPECT(luanatic::conversionScore<CoolClass&>(state, -1) == 1);
+            EXPECT(luanatic::conversionScore<const B *>(state, -1) == std::numeric_limits<stick::Int32>::max());
+            EXPECT(luanatic::conversionScore<CoolClass &>(state, -1) == 1);
             EXPECT(luanatic::conversionScore<const E>(state, -1) == 0);
 
 
             //test conversion scoring for basic types
             lua_pushinteger(state, 3);
-            EXPECT(luanatic::conversionScore<const B*>(state, -1) == std::numeric_limits<stick::Int32>::max());
+            EXPECT(luanatic::conversionScore<const B *>(state, -1) == std::numeric_limits<stick::Int32>::max());
             EXPECT(luanatic::conversionScore<stick::Int32>(state, -1) == 0);
             EXPECT(luanatic::conversionScore<stick::UInt32>(state, -1) == 0);
             EXPECT(luanatic::conversionScore<stick::Float32>(state, -1) == 0);
-            
+
             lua_pushinteger(state, -9);
             EXPECT(luanatic::conversionScore<stick::Int32>(state, -1) == 0);
             EXPECT(luanatic::conversionScore<stick::UInt32>(state, -1) == std::numeric_limits<stick::Int32>::max());
-            
+
             lua_pushnumber(state, 3.5);
             EXPECT(luanatic::conversionScore<stick::Int32>(state, -1) == 1);
             EXPECT(luanatic::conversionScore<stick::Float32>(state, -1) == 0);
@@ -772,6 +783,32 @@ const Suite spec[] =
             EXPECT(luanatic::conversionScore<const char *>(state, -1) == 0);
 
             lua_pop(state, 5);
+        }
+        EXPECT(lua_gettop(state) == 0);
+        lua_close(state);
+    },
+    SUITE("Overload Tests")
+    {
+        lua_State * state = luanatic::createLuaState();
+        {
+            luanatic::openStandardLibraries(state);
+            luanatic::initialize(state);
+            luanatic::LuaValue globals = luanatic::globalsTable(state);
+
+            globals.registerFunction("overloadedFunction", LUANATIC_FUNCTION_OVERLOAD(Int32(*)(Int32, UInt32), &overloadedFunction));
+            globals.registerFunction("overloadedFunction", LUANATIC_FUNCTION_OVERLOAD(const char * (*)(const char *), &overloadedFunction));
+
+            String luaCode = "local a = overloadedFunction(1, 2)\n"
+                             "assert(a == 3)\n"
+                             "local b = overloadedFunction(\"hello world!\")\n"
+                             "assert(b == \"hello world!\")"
+                             ;
+
+            auto err = luanatic::execute(state, luaCode);
+            if (err)
+                printf("%s\n", err.message().cString());
+
+            EXPECT(!err);
         }
         EXPECT(lua_gettop(state) == 0);
         lua_close(state);

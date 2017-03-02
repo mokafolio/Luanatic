@@ -131,7 +131,7 @@ namespace luanatic
     {
         //function signature that computes an argument score
         //based on the current arguments on the stack (for signature matching)
-        typedef stick::Int32 (*ArgScoreFunction) (lua_State *);
+        typedef stick::Int32 (*ArgScoreFunction) (lua_State *, stick::Int32);
 
         inline stick::Size rawLen(lua_State * _state, int _index);
 
@@ -784,21 +784,52 @@ namespace luanatic
 #endif // LUA_VERSION_NUM >= 502
         }
 
-        struct STICK_LOCAL FunctionWithSignature
-        {
-            lua_CFunction function;
-            stick::DynamicArray<stick::TypeID> signature;
-        };
+        using Overloads = stick::DynamicArray<LuanaticFunction>;
 
-        struct STICK_LOCAL OverloadedFunction
+        stick::Int32 callOverloadedFunction(lua_State * _luaState)
         {
-            stick::DynamicArray<FunctionWithSignature> overloads;
-        };
+            stick::Int32 argCount = lua_gettop(_luaState);
+            printf("CALLING OVERLOADED %i\n", argCount);
+            lua_pushvalue(_luaState, lua_upvalueindex(1));
+            STICK_ASSERT(lua_isuserdata(_luaState, -1));
+            Overloads * overloads = (Overloads *)lua_touserdata(_luaState, -1);
+            lua_pop(_luaState, 1);
+            Overloads candidates;
+            stick::Int32 bestScore = std::numeric_limits<stick::Int32>::max();
+            for(auto it = overloads->begin(); it != overloads->end(); ++it)
+            {
+                stick::Int32 score = (*it).scoreFunction(_luaState, argCount);
+                printf("Score %i\n", score);
+                if (score == bestScore)
+                {
+                    candidates.append(*it);
+                }
+                else if (score < bestScore)
+                {
+                    candidates.clear();
+                    candidates.append(*it);
+                    bestScore = score;
+                }
+            }
 
-        struct STICK_LOCAL OverloadedContext
-        {
+            if (!candidates.count())
+            {
+                lua_pushstring(_luaState, "Could not find candidate for overloaded function\n");
+                lua_error(_luaState);
+            }
+            else if(candidates.count() > 1)
+            {
+                lua_pushstring(_luaState, "Ambiguous call to overloaded function.\n");
+                lua_error(_luaState);
+            }
+            else
+            {
+                printf("CALLING FUNCTION\n");
+                return candidates[0].function(_luaState);
+            }
 
-        };
+            return 0;
+        }
 
         void registerFunctions(lua_State * _luaState, stick::Int32 _targetTableIndex,
                                const ClassWrapperBase::NamedLuaFunctionArray & _functions,
@@ -817,7 +848,7 @@ namespace luanatic
                 if (lua_isnil(_luaState, -1))
                 {
                     lua_pushstring(_luaState, name); // ... CT mT nil name
-                    lua_pushlightuserdata(_luaState, (void*)(*it).function.scoreFunction);
+                    lua_pushlightuserdata(_luaState, (void *)(*it).function.scoreFunction);
                     lua_pushcclosure(_luaState, (*it).function.function, 1); // ... CT mT nil name func
                     /*const char *  val = lua_getupvalue(_luaState, -1, 1);
                     printf("UPVALUE %s\n", val);
@@ -839,57 +870,82 @@ namespace luanatic
                 }
                 else
                 {
-                    // 01. create a table that holds all the overloads
-                    // 02.
-                    // printf("CREATING OVERLOAD\n");
-                    // auto otherFunc = lua_gettop(_luaState);
+                    printf("CREATING OVERLOADED FUNCTION\n");
+                    auto otherFunc = lua_gettop(_luaState);
 
-                    // //this is the first overload, create a table, copy the existing function to the first index
-                    // //and the new overload to the second
-                    // lua_getfield(_luaState, _targetTableIndex, "__overloads"); // ... CT mT func mT.__overloads
+                    //this is the first overload, create a table, copy the existing function to the first index
+                    //and the new overload to the second
+                    lua_getfield(_luaState, _targetTableIndex, "__overloads"); // ... CT mT func mT.__overloads
 
-                    // //if there is not __overloads table in the current scope, create one
-                    // if (lua_isnil(_luaState, -1))
-                    // {
-                    //     lua_pop(_luaState, 1);
-                    //     lua_newtable(_luaState);
-                    //     lua_pushvalue(_luaState, -1);
-                    //     lua_setfield(_luaState, -4, "__overloads");
-                    // }
+                    //if there is not __overloads table in the current scope, create one
+                    if (lua_isnil(_luaState, -1))
+                    {
+                        lua_pop(_luaState, 1);
+                        lua_newtable(_luaState);
+                        lua_pushvalue(_luaState, -1);
+                        lua_setfield(_luaState, -4, "__overloads");
+                    }
 
-                    // lua_getfield(_luaState, -1, name); // ... CT mT func mT.__overloads mT.__overloads.name
-                    // if (lua_isnil(_luaState, -1)) // ... CT mT func mT.__overloads nil
-                    // {
-                    //     lua_newtable(_luaState); // ... CT mT func mT.__overloads nil {}
-                    //     lua_pushinteger(_luaState, 1); // ... CT mT func mT.__overloads nil {} 1
-                    //     lua_pushvalue(_luaState, otherFunc); // ... CT mT func mT.__overloads nil {} 1 otherFunc
-                    //     lua_settable(_luaState, -3); // ... CT mT func mT.__overloads nil {}
-                    //     lua_pushinteger(_luaState, 2); // ... CT mT func mT.__overloads nil {} 2
-                    //     lua_pushcfunction(_luaState, (*it).function.function); // ... CT mT func mT.__overloads nil {} 2 func
-                    //     /*if (_bNiceConstructor)
-                    //     {
-                    //         lua_pushcclosure(_luaState, callConstructorNice, 1);
-                    //     }*/
-                    //     lua_settable(_luaState, -3); // ... CT mT func mT.__overloads nil {}
-                    //     lua_pushvalue(_luaState, -1); // ... CT mT func mT.__overloads nil {} {}
-                    //     lua_setfield(_luaState, -4, name); // ... CT mT func mT.__overloads nil {}
-                    //     lua_remove(_luaState, -2); // ... CT mT func mT.__overloads {}
-                    // }
-                    // else
-                    // {
-                    //     lua_pushinteger(_luaState, detail::rawLen(_luaState, -1) + 1); // ... CT mT func mT.__overloads mT.__overloads.name i
-                    //     lua_pushcfunction(_luaState, (*it).function); // ... CT mT func mT.__overloads mT.__overloads.name i func
-                    //     /*if (_bNiceConstructor)
-                    //     {
-                    //         lua_pushcclosure(_luaState, callConstructorNice, 1);
-                    //     }*/
-                    //     lua_settable(_luaState, -3); // ... CT mT func mT.__overloads mT.__overloads.name
-                    // }
+                    lua_getfield(_luaState, -1, name); // ... CT mT func mT.__overloads mT.__overloads.name
+                    if (lua_isnil(_luaState, -1)) // ... CT mT func mT.__overloads nil
+                    {
+                        // lua_newtable(_luaState); // ... CT mT func mT.__overloads nil {}
+                        // lua_pushinteger(_luaState, 1); // ... CT mT func mT.__overloads nil {} 1
+                        // lua_pushvalue(_luaState, otherFunc); // ... CT mT func mT.__overloads nil {} 1 otherFunc
+                        // lua_settable(_luaState, -3); // ... CT mT func mT.__overloads nil {}
+                        // lua_pushinteger(_luaState, 2); // ... CT mT func mT.__overloads nil {} 2
+                        // lua_pushlightuserdata(_luaState, (void *)(*it).function.scoreFunction);
+                        // lua_pushcclosure(_luaState, (*it).function.function, 1); // ... CT mT func mT.__overloads nil {} 2 func
+                        // // if (_bNiceConstructor)
+                        // // {
+                        // //     lua_pushcclosure(_luaState, callConstructorNice, 1);
+                        // // }
+                        // lua_settable(_luaState, -3); // ... CT mT func mT.__overloads nil {}
+                        // lua_pushvalue(_luaState, -1); // ... CT mT func mT.__overloads nil {} {}
+                        // lua_setfield(_luaState, -4, name); // ... CT mT func mT.__overloads nil {}
+                        // lua_remove(_luaState, -2); // ... CT mT func mT.__overloads {}
 
-                    // //push the c closure and set the overloaded
-                    // //lua_pushcclosure(_luaState, callOverloadedFunction, 1); // ... CT mT func mT.__overloads closure
-                    // lua_setfield(_luaState, _targetTableIndex, name); // ... CT mT func mT.__overloads
-                    // lua_pop(_luaState, 2); // ... CT mT
+                        printf("A\n");
+                        pushUnregisteredType(_luaState, Overloads()); // ... CT mT func mT.__overloads nil overloads
+                        Overloads * overloads = (Overloads *)lua_touserdata(_luaState, -1);
+                        printf("A2\n");
+                        lua_pushvalue(_luaState, otherFunc); // ... CT mT func mT.__overloads nil overloads func
+                        lua_getupvalue(_luaState, -1, 1); // ... CT mT func mT.__overloads nil overloads func scoreFunc
+                        printf("A3\n");
+                        auto scoreFunc = (ArgScoreFunction)lua_touserdata(_luaState, -1);
+                        overloads->append({lua_tocfunction(_luaState, -2), scoreFunc});
+                        overloads->append({(*it).function.function, (*it).function.scoreFunction});
+                        printf("A4\n");
+                        lua_pop(_luaState, 2); // ... CT mT func mT.__overloads nil overloads
+                        lua_pushvalue(_luaState, -1); // ... CT mT func mT.__overloads nil overloads overloads
+                        lua_setfield(_luaState, -4, name); // ... CT mT func mT.__overloads nil overloads
+                        //@TODO: This can most likely be reduced to one call to clean up the stack (or at least pop the nil at the beginning)
+                        lua_remove(_luaState, -2); // ... CT mT func mT.__overloads overloads
+                        printf("B\n");
+                    }
+                    else
+                    {
+                        printf("C\n");
+                        STICK_ASSERT(lua_isuserdata(_luaState, -1));
+                        Overloads * overloads = (Overloads *)lua_touserdata(_luaState, -1);
+                        overloads->append({(*it).function.function, (*it).function.scoreFunction});
+                        printf("D\n");
+                        // lua_pushinteger(_luaState, detail::rawLen(_luaState, -1) + 1); // ... CT mT func mT.__overloads mT.__overloads.name i
+                        // lua_pushlightuserdata(_luaState, (void *)(*it).function.scoreFunction);
+                        // lua_pushcclosure(_luaState, (*it).function.function, 1); // ... CT mT func mT.__overloads mT.__overloads.name i func
+                        // // if (_bNiceConstructor)
+                        // // {
+                        // //     lua_pushcclosure(_luaState, callConstructorNice, 1);
+                        // // }
+                        // lua_settable(_luaState, -3); // ... CT mT func mT.__overloads mT.__overloads.name
+                    }
+
+                    //push the c closure and set the overloaded
+                    printf("E\n");
+                    lua_pushcclosure(_luaState, callOverloadedFunction, 1); // ... CT mT func mT.__overloads closure
+                    lua_setfield(_luaState, _targetTableIndex, name); // ... CT mT func mT.__overloads
+                    lua_pop(_luaState, 2); // ... CT mT
+                    printf("F\n");
                 }
             }
         }
@@ -1553,6 +1609,21 @@ namespace luanatic
             }
         };
 
+        //we need a special pusher for const char* as the rules for removing cv, reference and pointer
+        //don't apply to it.
+        template<>
+        struct Pusher<const char *>
+        {
+            template<class Policy>
+            static void push(lua_State * _luaState, const char * _val, const Policy & _policy = Policy())
+            {
+                if (!_val)
+                    lua_pushnil(_luaState);
+                else
+                    lua_pushstring(_luaState, _val);
+            }
+        };
+
         template <class T>
         struct Pusher<T *>
         {
@@ -1961,8 +2032,10 @@ namespace luanatic
         template<class...Args>
         struct ArgScore
         {
-            static stick::Int32 score(lua_State * _luaState)
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
             {
+                if(_argCount != sizeof...(Args))
+                    return std::numeric_limits<stick::Int32>::max();
                 stick::Int32 ret = 0;
                 scoreImpl(_luaState, ret, make_index_sequence<sizeof...(Args)>());
                 return ret;
@@ -1990,21 +2063,9 @@ namespace luanatic
         template <class Ret, class... Args, Ret (*Func)(Args...), class...Policies>
         struct FunctionWrapper<Ret(*)(Args...), Func, Policies...>
         {
-            static stick::Int32 score(lua_State * _luaState)
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
         {
-            return ArgScore<Args...>::score(_luaState);
-        }
-
-        template<class Arg>
-        static stick::Int32 scoreHelper(lua_State * _luaState, stick::Int32 _index, stick::Int32 & _outResult)
-        {
-            _outResult += conversionScore<Arg>(_luaState, _index);
-        }
-
-        template<std::size_t...N>
-        static stick::Int32 scoreImpl(lua_State * _luaState, stick::Int32 & _outResult, index_sequence<N...>)
-        {
-            stick::Int32 xs[] = {scoreHelper<Args>(_luaState, 1 + N, _outResult)...};
+            return ArgScore<Args...>::score(_luaState, _argCount);
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2027,9 +2088,9 @@ namespace luanatic
         struct FunctionWrapper<void(*)(Args...), Func, Policies...>
         {
 
-            static stick::Int32 score(lua_State * _luaState)
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
         {
-            return ArgScore<Args...>::score(_luaState);
+            return ArgScore<Args...>::score(_luaState, _argCount);
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2049,9 +2110,9 @@ namespace luanatic
         template <class Ret, class C, class... Args, Ret (C::*Func)(Args...), class...Policies>
         struct FunctionWrapper<Ret (C::*)(Args...), Func, Policies...>
         {
-            static stick::Int32 score(lua_State * _luaState)
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
         {
-            return ArgScore<Args...>::score(_luaState);
+            return ArgScore<Args...>::score(_luaState, _argCount);
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2076,9 +2137,9 @@ namespace luanatic
         struct FunctionWrapper<Ret (C::*)(Args...) const, Func, Policies...>
         {
 
-            static stick::Int32 score(lua_State * _luaState)
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
         {
-            return ArgScore<Args...>::score(_luaState);
+            return ArgScore<Args...>::score(_luaState, _argCount);
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2102,9 +2163,9 @@ namespace luanatic
         template <class C, class... Args, void (C::*Func)(Args...), class...Policies>
         struct FunctionWrapper<void (C::*)(Args...), Func, Policies...>
         {
-            static stick::Int32 score(lua_State * _luaState)
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
         {
-            return ArgScore<Args...>::score(_luaState);
+            return ArgScore<Args...>::score(_luaState, _argCount);
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2125,9 +2186,9 @@ namespace luanatic
         template <class C, class... Args, void (C::*Func)(Args...) const, class...Policies>
         struct FunctionWrapper<void (C::*)(Args...) const, Func, Policies...>
         {
-            static stick::Int32 score(lua_State * _luaState)
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
         {
-            return ArgScore<Args...>::score(_luaState);
+            return ArgScore<Args...>::score(_luaState, _argCount);
         }
 
         static stick::Int32 func(lua_State * _luaState)
