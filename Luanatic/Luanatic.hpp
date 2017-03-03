@@ -14,6 +14,8 @@
 #include <tuple>
 #include <cstdint>
 
+#include <cxxabi.h>
+
 extern "C" {
 #include <lauxlib.h>
 #include <lua.h>
@@ -1984,12 +1986,24 @@ namespace luanatic
             return callFunctionImpl<Ret>(_state, _callable, make_index_sequence<sizeof...(Args)>());
         }
 
+        stick::String demangleTypeName(const char * _name)
+        {
+            stick::Int32 status;
+            auto ret = abi::__cxa_demangle(_name, NULL, NULL, &status);
+            return ret ? stick::String(ret) : "";
+        }
+
         template<class T>
         struct RawTypeName
         {
-            static const char * name()
+            static stick::String name(std::size_t _argCount, std::size_t _idx)
             {
-                return typeid(T).name();
+                printf("MY NAME %s\n", demangleTypeName(typeid(T).name()).cString());
+                // return demangleTypeName(typeid(T).name());
+                if (_idx < _argCount - 1)
+                    return stick::String::concat(demangleTypeName(typeid(T).name()), ", ");
+                else
+                    return demangleTypeName(typeid(T).name());
             }
         };
 
@@ -1998,9 +2012,13 @@ namespace luanatic
         {
             static stick::String name()
             {
-                stick::String ret;
-                ret.append(stick::AppendVariadicFlag(), RawTypeName<Args>::name()...);
-                return ret;
+                return nameImpl(make_index_sequence<sizeof...(Args)>());
+            }
+
+            template<std::size_t...N>
+            static stick::String nameImpl(index_sequence<N...>)
+            {
+                return stick::String::concat("(", RawTypeName<Args>::name(sizeof...(Args), N)..., ")");
             }
         };
 
