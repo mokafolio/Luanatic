@@ -135,7 +135,7 @@ namespace luanatic
         //based on the current arguments on the stack (for signature matching)
         typedef stick::Int32 (*ArgScoreFunction) (lua_State *, stick::Int32);
 
-        typedef const char * (*SignatureStrFunction) (void);
+        typedef stick::String (*SignatureStrFunction) (void);
 
         inline stick::Size rawLen(lua_State * _state, int _index);
 
@@ -794,7 +794,6 @@ namespace luanatic
         inline stick::Int32 callOverloadedFunction(lua_State * _luaState)
         {
             stick::Int32 argCount = lua_gettop(_luaState);
-            printf("CALLING OVERLOADED %i\n", argCount);
             lua_pushvalue(_luaState, lua_upvalueindex(1));
             STICK_ASSERT(lua_isuserdata(_luaState, -1));
             Overloads * overloads = (Overloads *)lua_touserdata(_luaState, -1);
@@ -805,7 +804,6 @@ namespace luanatic
             for (auto it = overloads->begin(); it != overloads->end(); ++it)
             {
                 stick::Int32 score = (*it).scoreFunction(_luaState, argCount);
-                printf("Score %i\n", score);
                 if (score != std::numeric_limits<stick::Int32>::max()  && score == bestScore)
                 {
                     candidates[idx++] = *it;
@@ -823,23 +821,30 @@ namespace luanatic
 
             if (!idx)
             {
-                //lua_pushstring(_luaState, "Could not find candidate for overloaded function\n");
-                //lua_error(_luaState);
-                luaErrorWithStackTrace(_luaState, 1, "Could not find candidate for overloaded function.");
+                stick::String str;
+                for (stick::Size i = 0; i < overloads->count(); i++)
+                {
+                    if (i < overloads->count() - 1)
+                        str.append(stick::AppendVariadicFlag(), "   FU:", (*overloads)[i].signatureStrFunction(), ",\n");
+                    else
+                        str.append(stick::AppendVariadicFlag(), "   FU:", (*overloads)[i].signatureStrFunction(), "\n");
+                }
+                luaErrorWithStackTrace(_luaState, 1, "\nCould not find candidate for overloaded function, Candidates:\n%s", str.cString());
             }
             else if (idx > 1)
             {
-                //lua_pushstring(_luaState, "Ambiguous call to overloaded function.\n");
-                //lua_error(_luaState);
+                stick::String str;
                 for (stick::Int32 i = 0; i < idx; i++)
                 {
-                    printf("Canditate: %s\n", candidates[i].signatureStrFunction());
+                    if (i < idx - 1)
+                        str.append(stick::AppendVariadicFlag(), "   ", candidates[i].signatureStrFunction(), ",\n");
+                    else
+                        str.append(stick::AppendVariadicFlag(), "   ", candidates[i].signatureStrFunction(), "\n");
                 }
-                luaErrorWithStackTrace(_luaState, 1, "Ambiguous call to overloaded function.");
+                luaErrorWithStackTrace(_luaState, 1, "\nAmbiguous call to overloaded function, Candidates:\n%s", str.cString());
             }
             else
             {
-                printf("CALLING\n");
                 //call the function we found
                 return candidates[0].function(_luaState);
             }
@@ -1998,8 +2003,7 @@ namespace luanatic
         {
             static stick::String name(std::size_t _argCount, std::size_t _idx)
             {
-                printf("MY NAME %s\n", demangleTypeName(typeid(T).name()).cString());
-                // return demangleTypeName(typeid(T).name());
+                printf("DA NAME: %s\n", demangleTypeName(typeid(T).name()).cString());
                 if (_idx < _argCount - 1)
                     return stick::String::concat(demangleTypeName(typeid(T).name()), ", ");
                 else
@@ -2061,9 +2065,9 @@ namespace luanatic
             return ArgScore<Args...>::score(_luaState, _argCount);
         }
 
-        static const char * signatureStr()
+        static stick::String signatureStr()
         {
-            return SignatureName<Args...>::name().cString();
+            return SignatureName<Args...>::name();
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2091,9 +2095,9 @@ namespace luanatic
             return ArgScore<Args...>::score(_luaState, _argCount);
         }
 
-        static const char * signatureStr()
+        static stick::String signatureStr()
         {
-            return SignatureName<Args...>::name().cString();
+            return SignatureName<Args...>::name();
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2118,9 +2122,9 @@ namespace luanatic
             return ArgScore<Args...>::score(_luaState, _argCount);
         }
 
-        static const char * signatureStr()
+        static stick::String signatureStr()
         {
-            return SignatureName<Args...>::name().cString();
+            return SignatureName<Args...>::name();
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2150,9 +2154,9 @@ namespace luanatic
             return ArgScore<Args...>::score(_luaState, _argCount);
         }
 
-        static const char * signatureStr()
+        static stick::String signatureStr()
         {
-            return SignatureName<Args...>::name().cString();
+            return SignatureName<Args...>::name();
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2181,9 +2185,9 @@ namespace luanatic
             return ArgScore<Args...>::score(_luaState, _argCount);
         }
 
-        static const char * signatureStr()
+        static stick::String signatureStr()
         {
-            return SignatureName<Args...>::name().cString();
+            return SignatureName<Args...>::name();
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2209,9 +2213,9 @@ namespace luanatic
             return ArgScore<Args...>::score(_luaState, _argCount);
         }
 
-        static const char * signatureStr()
+        static stick::String signatureStr()
         {
-            return SignatureName<Args...>::name().cString();
+            return SignatureName<Args...>::name();
         }
 
         static stick::Int32 func(lua_State * _luaState)

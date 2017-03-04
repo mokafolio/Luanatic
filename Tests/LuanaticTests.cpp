@@ -804,7 +804,7 @@ const Suite spec[] =
             globals.registerFunction("overloadedFunction", LUANATIC_FUNCTION_OVERLOAD(const char * (*)(const char *), &overloadedFunction));
             globals.registerFunction("overloadedFunction", LUANATIC_FUNCTION_OVERLOAD(Float32 (*)(Float32, Float32), &overloadedFunction));
 
-            String luaCode = "local a = overloadedFunction(1, 2)\n"
+            String luaCode = "local a = overloadedFunction(1, 2, 3)\n"
                              "assert(a == 3)\n"
                              "local b = overloadedFunction(\"hello world!\")\n"
                              "assert(b == \"hello world!\")"
