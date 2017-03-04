@@ -2072,13 +2072,13 @@ namespace luanatic
             static stick::String name(std::size_t _argCount, std::size_t _idx)
             {
                 stick::String ret;
-                if (std::is_const<typename std::remove_pointer<typename std::remove_reference<T>::type>::type>::value)
-                    ret.append("const ");
                 ret.append(RawTypeName<T>::name());
-                if (std::is_reference<T>::value)
-                    ret.append(" &");
-                if (std::is_pointer<T>::value)
-                    ret.append(" *");
+                if (std::is_const<typename std::remove_reference<T>::type>::value)
+                    ret.append(" const");
+                if (std::is_lvalue_reference<T>::value)
+                    ret.append("&");
+                if (std::is_rvalue_reference<T>::value)
+                    ret.append("&&");
                 if (_idx < _argCount - 1)
                     ret.append(", ");
                 return ret;

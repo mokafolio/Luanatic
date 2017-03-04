@@ -851,6 +851,7 @@ const Suite spec[] =
 
             EXPECT(!err);
         }
+
         EXPECT(lua_gettop(state) == 0);
         lua_close(state);
     }
