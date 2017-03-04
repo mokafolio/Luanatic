@@ -65,13 +65,13 @@ struct A
 {
     A()
     {
-
+        printf("CONSTRUCT A\n");
     }
 
     A(Float32 _a) :
         a(_a)
     {
-
+        printf("CONSTRUCT A2\n");
     }
 
     virtual ~A()
@@ -802,12 +802,23 @@ const Suite spec[] =
 
             globals.registerFunction("overloadedFunction", LUANATIC_FUNCTION_OVERLOAD(Int32(*)(Int32, UInt32), &overloadedFunction));
             globals.registerFunction("overloadedFunction", LUANATIC_FUNCTION_OVERLOAD(const char * (*)(const char *), &overloadedFunction));
-            globals.registerFunction("overloadedFunction", LUANATIC_FUNCTION_OVERLOAD(Float32 (*)(Float32, Float32), &overloadedFunction));
+            //globals.registerFunction("overloadedFunction", LUANATIC_FUNCTION_OVERLOAD(Float32 (*)(Float32, Float32), &overloadedFunction));
 
-            String luaCode = "local a = overloadedFunction(1, 2, 3)\n"
+            luanatic::ClassWrapper<A> aw("A");
+            aw.
+            addConstructor<Float32>().
+            addMemberFunction("doubleA", LUANATIC_FUNCTION_OVERLOAD(void(A::*)(void), &A::doubleA)).
+            addMemberFunction("doubleABy", LUANATIC_FUNCTION_OVERLOAD(void(A::*)(Float32), &A::doubleA)).
+            addAttribute("a", LUANATIC_ATTRIBUTE(&A::a));
+
+            globals.registerClass(aw);
+
+            String luaCode = "local a = overloadedFunction(1, 2)\n"
                              "assert(a == 3)\n"
                              "local b = overloadedFunction(\"hello world!\")\n"
-                             "assert(b == \"hello world!\")"
+                             "assert(b == \"hello world!\")\n"
+                             "local c = A(2.5)\n"
+                             "assert(c.a == 2.5)"
                              ;
 
             auto err = luanatic::execute(state, luaCode);

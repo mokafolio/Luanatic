@@ -630,6 +630,7 @@ namespace luanatic
         NamedLuaFunctionArray m_members;
         NamedLuaFunctionArray m_statics;
         NamedLuaFunctionArray m_attributes;
+        NamedLuaFunctionArray m_constructors;
         BaseArray m_bases;
         CastArray m_casts;
     };
@@ -641,6 +642,9 @@ namespace luanatic
         using ClassType = T;
 
         ClassWrapper(const stick::String & _name);
+
+        template<class...Args>
+        ClassWrapper & addConstructor();
 
         template <class... Args>
         ClassWrapper & addConstructor(const stick::String & _str);
@@ -851,6 +855,26 @@ namespace luanatic
             return 0;
         }
 
+        inline stick::Int32 callConstructorNice(lua_State * _luaState)
+        {
+            //for nice constructor we need to pop the first stack item
+            lua_remove(_luaState, 1);
+
+            stick::Int32 argCount = lua_gettop(_luaState);
+
+            //push the actual constructor onto the stack
+            stick::Int32 idx = lua_upvalueindex(1);
+            lua_pushvalue(_luaState, idx);
+
+            //insert it before the arguments
+            lua_insert(_luaState, -1 - argCount);
+
+            //and call it
+            lua_call(_luaState, argCount, 1);
+
+            return 1;
+        }
+
         void registerFunctions(lua_State * _luaState, stick::Int32 _targetTableIndex,
                                const ClassWrapperBase::NamedLuaFunctionArray & _functions,
                                const stick::String & _nameReplace = "",
@@ -879,6 +903,10 @@ namespace luanatic
                 {
                     lua_pushstring(_luaState, name); // ... CT mT nil name
                     lua_pushcfunction(_luaState, (*it).function.function); // ... CT mT nil name func
+                    if (_bNiceConstructor)
+                    {
+                        lua_pushcclosure(_luaState, callConstructorNice, 1);
+                    }
                     lua_settable(_luaState, -4); // ... CT mT nil
                     lua_pop(_luaState, 1); // ... CT mT
 
@@ -905,6 +933,10 @@ namespace luanatic
                     //push the c closure and set the overloaded
                     printf("E\n");
                     lua_pushcclosure(_luaState, callOverloadedFunction, 1); // ... CT mT __overloads namefield closure
+                    if (_bNiceConstructor)
+                    {
+                        lua_pushcclosure(_luaState, callConstructorNice, 1);
+                    }
                     lua_setfield(_luaState, -4, name); // ... CT mT __overloads namefield
                     lua_pop(_luaState, 2); // ... CT mT
                     printf("F\n");
@@ -988,6 +1020,13 @@ namespace luanatic
             lua_pushvalue(_state, classTable);                      // ... CT "className" CT
             lua_settable(_state, -4);                               // ... CT
 
+            //add a metatable to the class table with a __call metamethod to allow nice constructors such as MyClass()
+            //instead of MyClass.new()
+            lua_newtable(_state); // ... CT {}
+            stick::Int32 classMetaTable = lua_gettop(_state);
+            registerFunctions(_state, classMetaTable, _wrapper.m_constructors, "__call", true);
+            lua_setmetatable(_state, classTable); // ... CT
+
             //register static functions in class table
             registerFunctions(_state, classTable, _wrapper.m_statics);
 
@@ -1008,7 +1047,7 @@ namespace luanatic
             lua_pushstring(_state, _wrapper.m_className.cString());
             lua_settable(_state, classTable); // ... CT mT
 
-            //register member functions in metatable
+            //register member functions
             registerFunctions(_state, classTable, _wrapper.m_members);
 
             //destructor
@@ -2443,6 +2482,14 @@ namespace luanatic
     ClassWrapper<T>::ClassWrapper(const stick::String & _name)
         : ClassWrapperBase(stick::TypeInfoT<T>::typeID(), _name)
     {
+    }
+
+    template <class T>
+    template <class... Args>
+    ClassWrapper<T> & ClassWrapper<T>::addConstructor()
+    {
+        m_constructors.append({"", detail::ConstructorWrapper<T, Args...>::func });
+        return *this;
     }
 
     template <class T>
