@@ -797,6 +797,7 @@ namespace luanatic
 
         inline stick::Int32 callOverloadedFunction(lua_State * _luaState)
         {
+            printf("CALL OVERLOADED\n");
             stick::Int32 argCount = lua_gettop(_luaState);
             lua_pushvalue(_luaState, lua_upvalueindex(1));
             STICK_ASSERT(lua_isuserdata(_luaState, -1));
@@ -805,9 +806,12 @@ namespace luanatic
             LuanaticFunction candidates[16];
             stick::Size idx = 0;
             stick::Int32 bestScore = std::numeric_limits<stick::Int32>::max();
+            printf("A\n");
             for (auto it = overloads->begin(); it != overloads->end(); ++it)
             {
+                printf("A2\n");
                 stick::Int32 score = (*it).scoreFunction(_luaState, argCount);
+                printf("A3\n");
                 if (score != std::numeric_limits<stick::Int32>::max()  && score == bestScore)
                 {
                     candidates[idx++] = *it;
@@ -822,6 +826,7 @@ namespace luanatic
                 if (idx == 15)
                     break;
             }
+            printf("B\n");
 
             if (!idx)
             {
@@ -2336,6 +2341,16 @@ namespace luanatic
         template <class T, class... Args>
         struct ConstructorWrapper
         {
+            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
+            {
+                return ArgScore<Args...>::score(_luaState, _argCount);
+            }
+
+            static stick::String signatureStr()
+            {
+                return SignatureName<Args...>::name();
+            }
+
             //this function serves to have an extra step between converting the arguments
             //from lua, so that in case of an error, we don't leak the newly created T obj
             static T * create(LuanaticState * _state, Args... _args)
@@ -2488,7 +2503,7 @@ namespace luanatic
     template <class... Args>
     ClassWrapper<T> & ClassWrapper<T>::addConstructor()
     {
-        m_constructors.append({"", detail::ConstructorWrapper<T, Args...>::func });
+        m_constructors.append({"", {&detail::ConstructorWrapper<T, Args...>::func, &detail::ConstructorWrapper<T, Args...>::score, &detail::ConstructorWrapper<T, Args...>::signatureStr}});
         return *this;
     }
 
@@ -2496,7 +2511,7 @@ namespace luanatic
     template <class... Args>
     ClassWrapper<T> & ClassWrapper<T>::addConstructor(const stick::String & _str)
     {
-        m_statics.append({ _str, detail::ConstructorWrapper<T, Args...>::func });
+        m_statics.append({ _str, {&detail::ConstructorWrapper<T, Args...>::func, &detail::ConstructorWrapper<T, Args...>::score, &detail::ConstructorWrapper<T, Args...>::signatureStr}});
         return *this;
     }
 

@@ -63,7 +63,8 @@ Int32 TestClass::s_staticFuncCounter = 0;
 
 struct A
 {
-    A()
+    A() :
+        a(0.25f)
     {
         printf("CONSTRUCT A\n");
     }
@@ -806,6 +807,7 @@ const Suite spec[] =
 
             luanatic::ClassWrapper<A> aw("A");
             aw.
+            addConstructor<>().
             addConstructor<Float32>().
             addMemberFunction("doubleA", LUANATIC_FUNCTION_OVERLOAD(void(A::*)(void), &A::doubleA)).
             addMemberFunction("doubleABy", LUANATIC_FUNCTION_OVERLOAD(void(A::*)(Float32), &A::doubleA)).
@@ -819,6 +821,8 @@ const Suite spec[] =
                              "assert(b == \"hello world!\")\n"
                              "local c = A(2.5)\n"
                              "assert(c.a == 2.5)"
+                             "local d = A()\n"
+                             "assert(d.a == 0.25)"
                              ;
 
             auto err = luanatic::execute(state, luaCode);
