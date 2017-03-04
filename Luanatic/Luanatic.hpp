@@ -601,10 +601,24 @@ namespace luanatic
             return *this;
         }
 
+        ClassWrapperBase & addMemberFunction(const stick::String & _name,
+                                             lua_CFunction _function)
+        {
+            m_members.append({ _name, {_function, NULL, NULL}});
+            return *this;
+        }
+
         ClassWrapperBase & addStaticFunction(const stick::String & _name,
                                              LuanaticFunction _function)
         {
             m_statics.append({ _name, _function });
+            return *this;
+        }
+
+        ClassWrapperBase & addStaticFunction(const stick::String & _name,
+                                             lua_CFunction _function)
+        {
+            m_statics.append({ _name, {_function, NULL, NULL}});
             return *this;
         }
 
@@ -811,7 +825,7 @@ namespace luanatic
             {
                 printf("A2\n");
                 stick::Int32 score = (*it).scoreFunction(_luaState, argCount);
-                printf("A3\n");
+                printf("A3 %lu\n", score);
                 if (score != std::numeric_limits<stick::Int32>::max()  && score == bestScore)
                 {
                     candidates[idx++] = *it;
@@ -2075,8 +2089,10 @@ namespace luanatic
         {
             static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
             {
+                printf("SCORE A\n");
                 if (_argCount != sizeof...(Args))
                     return std::numeric_limits<stick::Int32>::max();
+                printf("SCORE B\n");
                 stick::Int32 ret = 0;
                 scoreImpl(_luaState, ret, make_index_sequence<sizeof...(Args)>());
                 return ret;
@@ -2163,7 +2179,7 @@ namespace luanatic
         {
             static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
         {
-            return ArgScore<Args...>::score(_luaState, _argCount);
+            return ArgScore<Args...>::score(_luaState, _argCount - 1);
         }
 
         static stick::String signatureStr()
@@ -2195,7 +2211,7 @@ namespace luanatic
 
             static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
         {
-            return ArgScore<Args...>::score(_luaState, _argCount);
+            return ArgScore<Args...>::score(_luaState, _argCount - 1);
         }
 
         static stick::String signatureStr()
@@ -2226,7 +2242,7 @@ namespace luanatic
         {
             static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
         {
-            return ArgScore<Args...>::score(_luaState, _argCount);
+            return ArgScore<Args...>::score(_luaState, _argCount - 1);
         }
 
         static stick::String signatureStr()
@@ -2254,7 +2270,7 @@ namespace luanatic
         {
             static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
         {
-            return ArgScore<Args...>::score(_luaState, _argCount);
+            return ArgScore<Args...>::score(_luaState, _argCount - 1);
         }
 
         static stick::String signatureStr()

@@ -141,9 +141,16 @@ struct CoolClass : public A
     Float32 c;
 };
 
-void printA(const A & _a)
+Float32 printA(const A & _a)
 {
     printf("I am printing an A: %f\n", _a.a);
+    return _a.a;
+}
+
+Float32 printB(const B & _a)
+{
+    printf("I am printing an B: %f\n", _a.b);
+    return _a.b;
 }
 
 struct D : public A, public B
@@ -813,7 +820,16 @@ const Suite spec[] =
             addMemberFunction("doubleABy", LUANATIC_FUNCTION_OVERLOAD(void(A::*)(Float32), &A::doubleA)).
             addAttribute("a", LUANATIC_ATTRIBUTE(&A::a));
 
+            luanatic::ClassWrapper<B> bw("B");
+            bw.
+            addConstructor<Float32>().
+            addMemberFunction("halfB", LUANATIC_FUNCTION(&B::halfB)).
+            addAttribute("b", LUANATIC_ATTRIBUTE(&B::b));
+
             globals.registerClass(aw);
+            globals.registerClass(bw);
+            globals.registerFunction("printOverload", LUANATIC_FUNCTION(&printA));
+            globals.registerFunction("printOverload", LUANATIC_FUNCTION(&printB));
 
             String luaCode = "local a = overloadedFunction(1, 2)\n"
                              "assert(a == 3)\n"
@@ -822,7 +838,11 @@ const Suite spec[] =
                              "local c = A(2.5)\n"
                              "assert(c.a == 2.5)"
                              "local d = A()\n"
-                             "assert(d.a == 0.25)"
+                             "assert(d.a == 0.25)\n"
+                             "local e = B(1.0)\n"
+                             "assert(e.b == 1.0)\n"
+                             "assert(printOverload(d) == 0.25)\n"
+                             "assert(printOverload(e) == 1.0)\n"
                              ;
 
             auto err = luanatic::execute(state, luaCode);
