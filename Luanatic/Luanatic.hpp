@@ -823,7 +823,7 @@ namespace luanatic
             printf("A\n");
             for (auto it = overloads->begin(); it != overloads->end(); ++it)
             {
-                printf("A2\n");
+                printf("A2 %s\n", (*it).signatureStrFunction().cString());
                 stick::Int32 score = (*it).scoreFunction(_luaState, argCount);
                 printf("A3 %lu\n", score);
                 if (score != std::numeric_limits<stick::Int32>::max()  && score == bestScore)
@@ -2059,15 +2059,32 @@ namespace luanatic
         template<class T>
         struct RawTypeName
         {
-            static stick::String name(std::size_t _argCount, std::size_t _idx)
+            static stick::String name()
             {
                 printf("DA NAME: %s\n", demangleTypeName(typeid(T).name()).cString());
-                if (_idx < _argCount - 1)
-                    return stick::String::concat(demangleTypeName(typeid(T).name()), ", ");
-                else
-                    return demangleTypeName(typeid(T).name());
+                return demangleTypeName(typeid(T).name());
             }
         };
+
+        template<class T>
+        struct ArgName
+        {
+            static stick::String name(std::size_t _argCount, std::size_t _idx)
+            {
+                stick::String ret;
+                if (std::is_const<typename std::remove_pointer<typename std::remove_reference<T>::type>::type>::value)
+                    ret.append("const ");
+                ret.append(RawTypeName<T>::name());
+                if (std::is_reference<T>::value)
+                    ret.append(" &");
+                if (std::is_pointer<T>::value)
+                    ret.append(" *");
+                if (_idx < _argCount - 1)
+                    ret.append(", ");
+                return ret;
+            }
+        };
+
 
         template<class...Args>
         struct SignatureName
@@ -2080,7 +2097,7 @@ namespace luanatic
             template<std::size_t...N>
             static stick::String nameImpl(index_sequence<N...>)
             {
-                return stick::String::concat("(", RawTypeName<Args>::name(sizeof...(Args), N)..., ")");
+                return stick::String::concat("(", ArgName<Args>::name(sizeof...(Args), N)..., ")");
             }
         };
 
