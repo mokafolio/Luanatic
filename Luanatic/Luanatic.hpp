@@ -151,7 +151,6 @@ namespace luanatic
         inline void luaErrorWithStackTrace(lua_State * _state, int _index, const char * _fmt, Args ... _args)
         {
             luaL_traceback(_state, _state, NULL, _index);
-            printf("%s\n\n", lua_tostring(_state, -1));
             luaL_error(_state, _fmt, _args...);
         }
 
@@ -755,14 +754,12 @@ namespace luanatic
 
         inline FindCastFunctionResult findCastFunctionImpl(LuanaticState & _luanaticState, const UserData & _currentUserData, stick::TypeID _targetTypeID, stick::Int32 _depth)
         {
-            printf("FCFI: %lu\n", _depth);
             UserData ret = _currentUserData;
 
             auto fit = _luanaticState.m_typeIDClassMap.find(ret.m_typeID);
             if(fit == _luanaticState.m_typeIDClassMap.end())
                 return {-1, ret};
             auto & casts = fit->value.wrapper->m_casts;
-            printf("DEAD\n");
             auto it = casts.begin();
 
             // check direct bases
@@ -817,7 +814,6 @@ namespace luanatic
 
         inline stick::Int32 callOverloadedFunction(lua_State * _luaState)
         {
-            printf("CALL OVERLOADED\n");
             stick::Int32 argCount = lua_gettop(_luaState);
             lua_pushvalue(_luaState, lua_upvalueindex(1));
             STICK_ASSERT(lua_isuserdata(_luaState, -1));
@@ -826,12 +822,9 @@ namespace luanatic
             LuanaticFunction candidates[16];
             stick::Size idx = 0;
             stick::Int32 bestScore = std::numeric_limits<stick::Int32>::max();
-            printf("A\n");
             for (auto it = overloads->begin(); it != overloads->end(); ++it)
             {
-                printf("A2 %s\n", (*it).signatureStrFunction().cString());
                 stick::Int32 score = (*it).scoreFunction(_luaState, argCount);
-                printf("A3 %lu\n", score);
                 if (score != std::numeric_limits<stick::Int32>::max()  && score == bestScore)
                 {
                     candidates[idx++] = *it;
@@ -846,7 +839,6 @@ namespace luanatic
                 if (idx == 15)
                     break;
             }
-            printf("B\n");
 
             if (!idx)
             {
@@ -947,16 +939,13 @@ namespace luanatic
                 }
                 else
                 {
-                    printf("CREATING OVERLOADED FUNCTION\n");
                     lua_getfield(_luaState, _targetTableIndex, "__overloads"); // ... CT mT __overloads
                     lua_getfield(_luaState, -1, name); // ... CT mT __overloads namefield
                     STICK_ASSERT(lua_isuserdata(_luaState, -1));
                     Overloads * overloads = (Overloads *)lua_touserdata(_luaState, -1);
                     overloads->append((*it).function);
-                    printf("D\n");
 
                     //push the c closure and set the overloaded
-                    printf("E\n");
                     lua_pushcclosure(_luaState, callOverloadedFunction, 1); // ... CT mT __overloads namefield closure
                     if (_bNiceConstructor)
                     {
@@ -964,7 +953,6 @@ namespace luanatic
                     }
                     lua_setfield(_luaState, -4, name); // ... CT mT __overloads namefield
                     lua_pop(_luaState, 2); // ... CT mT
-                    printf("F\n");
                 }
             }
         }
@@ -1338,12 +1326,10 @@ namespace luanatic
         }
         else
         {
-            printf("WHAT\n");
             detail::UserData * pud = static_cast<detail::UserData *>(lua_touserdata(_luaState, _index));
             detail::LuanaticState * glua = detail::luanaticState(_luaState);
             STICK_ASSERT(glua != nullptr);
             auto cc = detail::findCastFunctionImpl(*glua, *pud, stick::TypeInfoT<RT>::typeID(), 1).castCount;
-            printf("DAFG\n");
             if (cc != -1)
                 return cc;
             else return std::numeric_limits<stick::Int32>::max();
@@ -2069,7 +2055,6 @@ namespace luanatic
         {
             static stick::String name()
             {
-                printf("DA NAME: %s\n", demangleTypeName(typeid(T).name()).cString());
                 return demangleTypeName(typeid(T).name());
             }
         };
@@ -2114,13 +2099,10 @@ namespace luanatic
         {
             static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount, stick::Int32 _indexOff)
             {
-                printf("SCORE A %i %lu\n", _argCount, sizeof...(Args));
                 if (_argCount != sizeof...(Args))
                     return std::numeric_limits<stick::Int32>::max();
-                printf("SCORE B\n");
                 stick::Int32 ret = 0;
                 scoreImpl(_luaState, _indexOff, ret, make_index_sequence<sizeof...(Args)>());
-                printf("SCORE C\n");
                 return ret;
             }
 
