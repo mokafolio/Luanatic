@@ -50,6 +50,7 @@ LUANATIC_FUNCTION_OVERLOAD_P, \
 LUANATIC_FUNCTION_OVERLOAD_P, \
 LUANATIC_FUNCTION_OVERLOAD_2)(__VA_ARGS__)
 #define LUANATIC_ATTRIBUTE(x) luanatic::detail::AttributeWrapper<decltype(x), x>::func
+//#define LUANATIC_FUNCTION_DEFAULT_ARGS(x) luanatic::detail::DefaultArgFunctionWrapper<decltype(x), x>::func
 
 namespace luanatic
 {
@@ -172,6 +173,11 @@ namespace luanatic
         {
             using Type = const char*;
         };
+
+        struct DefaultArgsBase
+        {
+            virtual void push(lua_State * _state) const = 0;
+        };
     }
 
     struct STICK_API LuanaticFunction
@@ -179,6 +185,7 @@ namespace luanatic
         lua_CFunction function;
         detail::ArgScoreFunction scoreFunction;
         detail::SignatureStrFunction signatureStrFunction;
+        detail::DefaultArgsBase * defaultArgs;
     };
 
     template <class U, class Enable = void>
@@ -757,8 +764,8 @@ namespace luanatic
             UserData ret = _currentUserData;
 
             auto fit = _luanaticState.m_typeIDClassMap.find(ret.m_typeID);
-            if(fit == _luanaticState.m_typeIDClassMap.end())
-                return {-1, ret};
+            if (fit == _luanaticState.m_typeIDClassMap.end())
+                return { -1, ret};
             auto & casts = fit->value.wrapper->m_casts;
             auto it = casts.begin();
 
@@ -1741,7 +1748,6 @@ namespace luanatic
                 Pusher<T *>::push(_state, std::forward<T *>(_value), _policy);
             }
         };
-
     }
 
     template<class F>
@@ -2489,6 +2495,41 @@ namespace luanatic
             pushUnregisteredType<Iterator>(_luaState, _end);
             RangeFunctionPusher<Iterator, ForceReference>::push(_luaState);
         }
+
+        template<class T>
+        int _push(lua_State * _luaState, T _value)
+        {
+            Pusher<T>::push(_luaState, std::forward<T>(_value), NoPolicy());
+            return 0;
+        }
+
+        template<class...Args>
+        struct DefaultArgs : public DefaultArgsBase
+        {
+            DefaultArgs()
+            {
+            }
+
+            DefaultArgs(Args..._args) :
+                values(_args...)
+            {
+            }
+
+            void push(lua_State * _state) const
+            {
+                pushHelper(_state, make_index_sequence<sizeof...(Args)>());
+                //int tmp[] = {(int)_push<Args>(_state, std::get<Args>(values))...};
+            }
+
+
+            template<stick::Size...N>
+            void pushHelper(lua_State * _state, index_sequence<N...>) const
+            {
+                int tmp[] = {_push<Args>(_state, std::get<N>(values))...};
+            }
+
+            std::tuple<Args...> values;
+        };
     }
 
     template<class G>
@@ -2848,6 +2889,19 @@ namespace luanatic
             lua_pop(m_state, 1);
             return *this;
         }
+
+        /*template<class...Args>
+        LuaValue & registerFunction(const stick::String & _name,
+                                    LuanaticFunction _function, Args..._args)
+        {
+            STICK_ASSERT(m_state && m_type == LuaType::Table);
+            push();
+            ClassWrapperBase::NamedLuaFunctionArray tmp;
+            tmp.append({ _name, _function });
+            detail::registerFunctions(m_state, lua_gettop(m_state), tmp);
+            lua_pop(m_state, 1);
+            return *this;
+        }*/
 
         template<class Ret, class...Args>
         struct CallFunctionProxy

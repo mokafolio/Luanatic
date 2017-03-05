@@ -831,6 +831,9 @@ const Suite spec[] =
             globals.registerFunction("printOverload", LUANATIC_FUNCTION(&printA));
             globals.registerFunction("printOverload", LUANATIC_FUNCTION(&printB));
 
+
+            luanatic::detail::DefaultArgs<int, float> d(1, 2.5f);
+
             String luaCode = "local a = overloadedFunction(1, 2)\n"
                              "assert(a == 3)\n"
                              "local b = overloadedFunction(\"hello world!\")\n"
