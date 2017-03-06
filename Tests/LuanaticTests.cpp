@@ -831,9 +831,6 @@ const Suite spec[] =
             globals.registerFunction("printOverload", LUANATIC_FUNCTION(&printA));
             globals.registerFunction("printOverload", LUANATIC_FUNCTION(&printB));
 
-
-            luanatic::detail::DefaultArgs<int, float> d(1, 2.5f);
-
             String luaCode = "local a = overloadedFunction(1, 2)\n"
                              "assert(a == 3)\n"
                              "local b = overloadedFunction(\"hello world!\")\n"
@@ -855,6 +852,39 @@ const Suite spec[] =
             EXPECT(!err);
         }
 
+        EXPECT(lua_gettop(state) == 0);
+        lua_close(state);
+    },
+    SUITE("Default Argument Tests")
+    {
+        lua_State * state = luanatic::createLuaState();
+        {
+            luanatic::openStandardLibraries(state);
+            luanatic::initialize(state);
+            luanatic::LuaValue globals = luanatic::globalsTable(state);
+
+            globals.registerFunction("overloadedFunction", LUANATIC_FUNCTION_OVERLOAD(Int32(*)(Int32, UInt32), &overloadedFunction), 1, 2);
+            globals.registerFunction("overloadedFunction", LUANATIC_FUNCTION_OVERLOAD(const char * (*)(const char *), &overloadedFunction));
+
+
+            String luaCode = "local a = overloadedFunction()\n"
+                             "assert(a == 3)\n"
+                             ;
+
+            auto err = luanatic::execute(state, luaCode);
+            if (err)
+                printf("%s\n", err.message().cString());
+
+            EXPECT(!err);
+
+            luanatic::detail::DefaultArgs<int, float, const char *> d(1, 2.5f, "test");
+            d.push(state, 3);
+            EXPECT(luaL_checkinteger(state, -3) == 1);
+            EXPECT(luaL_checknumber(state, -2) == 2.5);
+            EXPECT(std::strcmp(luaL_checkstring(state, -1), "test") == 0);
+
+            lua_pop(state, 3);
+        }
         EXPECT(lua_gettop(state) == 0);
         lua_close(state);
     }

@@ -23,8 +23,18 @@ extern "C" {
 }
 
 #define LUANATIC_KEY "__Luanatic"
-#define LUANATIC_FUNCTION_1(x) {&luanatic::detail::FunctionWrapper<decltype(x), x>::func, &luanatic::detail::FunctionWrapper<decltype(x), x>::score, &luanatic::detail::FunctionWrapper<decltype(x), x>::signatureStr}
-#define LUANATIC_FUNCTION_P(x, ...) {&luanatic::detail::FunctionWrapper<decltype(x), x, __VA_ARGS__>::func, &luanatic::detail::FunctionWrapper<decltype(x), x, __VA_ARGS__>::score, &luanatic::detail::FunctionWrapper<decltype(x), x, __VA_ARGS__>::signatureStr}
+#define LUANATIC_FUNCTION_1(x){\
+ &luanatic::detail::FunctionWrapper<decltype(x), x>::func,\
+ &luanatic::detail::FunctionWrapper<decltype(x), x>::score,\
+ &luanatic::detail::FunctionWrapper<decltype(x), x>::signatureStr,\
+ &luanatic::detail::FunctionWrapper<decltype(x), x>::argCount\
+}
+#define LUANATIC_FUNCTION_P(x, ...){\
+&luanatic::detail::FunctionWrapper<decltype(x), x, __VA_ARGS__>::func,\
+&luanatic::detail::FunctionWrapper<decltype(x), x, __VA_ARGS__>::score,\
+&luanatic::detail::FunctionWrapper<decltype(x), x, __VA_ARGS__>::signatureStr,\
+&luanatic::detail::FunctionWrapper<decltype(x), x, __VA_ARGS__>::argCount\
+}
 #define LUANATIC_GET_MACRO(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,NAME,...) NAME
 #define LUANATIC_FUNCTION(...) LUANATIC_GET_MACRO(__VA_ARGS__, \
 LUANATIC_FUNCTION_P, \
@@ -37,8 +47,18 @@ LUANATIC_FUNCTION_P, \
 LUANATIC_FUNCTION_P, \
 LUANATIC_FUNCTION_P, \
 LUANATIC_FUNCTION_1)(__VA_ARGS__)
-#define LUANATIC_FUNCTION_OVERLOAD_2(sig, x) {&luanatic::detail::FunctionWrapper<sig, x>::func, &luanatic::detail::FunctionWrapper<sig, x>::score, &luanatic::detail::FunctionWrapper<sig, x>::signatureStr}
-#define LUANATIC_FUNCTION_OVERLOAD_P(sig, x, ...) {&luanatic::detail::FunctionWrapper<sig, x, __VA_ARGS__>::func, &luanatic::detail::FunctionWrapper<sig, x, __VA_ARGS__>::score, &luanatic::detail::FunctionWrapper<sig, x, __VA_ARGS__>::signatureStr}
+#define LUANATIC_FUNCTION_OVERLOAD_2(sig, x) {\
+ &luanatic::detail::FunctionWrapper<sig, x>::func,\
+ &luanatic::detail::FunctionWrapper<sig, x>::score,\
+ &luanatic::detail::FunctionWrapper<sig, x>::signatureStr,\
+ &luanatic::detail::FunctionWrapper<sig, x>::argCount\
+}
+#define LUANATIC_FUNCTION_OVERLOAD_P(sig, x, ...) {\
+&luanatic::detail::FunctionWrapper<sig, x, __VA_ARGS__>::func,\
+&luanatic::detail::FunctionWrapper<sig, x, __VA_ARGS__>::score,\
+&luanatic::detail::FunctionWrapper<sig, x, __VA_ARGS__>::signatureStr,\
+&luanatic::detail::FunctionWrapper<sig, x, __VA_ARGS__>::argCount\
+}
 #define LUANATIC_FUNCTION_OVERLOAD(...) LUANATIC_GET_MACRO(__VA_ARGS__, \
 LUANATIC_FUNCTION_OVERLOAD_P, \
 LUANATIC_FUNCTION_OVERLOAD_P, \
@@ -134,9 +154,12 @@ namespace luanatic
     {
         //function signature that computes an argument score
         //based on the current arguments on the stack (for signature matching)
-        typedef stick::Int32 (*ArgScoreFunction) (lua_State *, stick::Int32);
+        typedef stick::Int32 (*ArgScoreFunction) (lua_State *, stick::Int32, stick::Int32, stick::Int32 *);
 
         typedef stick::String (*SignatureStrFunction) (void);
+
+        typedef stick::Size (*ArgCountFunction) (void);
+
 
         inline stick::Size rawLen(lua_State * _state, int _index);
 
@@ -176,15 +199,38 @@ namespace luanatic
 
         struct DefaultArgsBase
         {
-            virtual void push(lua_State * _state) const = 0;
+            virtual ~DefaultArgsBase() = default;
+            virtual void push(lua_State * _state, stick::Int32 _count) const = 0;
+            virtual stick::Size argCount() const = 0;
         };
     }
 
     struct STICK_API LuanaticFunction
     {
+        LuanaticFunction(lua_CFunction _a = nullptr,
+                         detail::ArgScoreFunction _b = nullptr,
+                         detail::SignatureStrFunction _c = nullptr,
+                         detail::ArgCountFunction _d = nullptr,
+                         detail::DefaultArgsBase * _e = nullptr) :
+            function(_a),
+            scoreFunction(_b),
+            signatureStrFunction(_c),
+            argCountFunction(_d),
+            defaultArgs(_e)
+        {
+
+        }
+
+        ~LuanaticFunction()
+        {
+            /*if (defaultArgs)
+                stick::destroy(defaultArgs);*/
+        }
+
         lua_CFunction function;
         detail::ArgScoreFunction scoreFunction;
         detail::SignatureStrFunction signatureStrFunction;
+        detail::ArgCountFunction argCountFunction;
         detail::DefaultArgsBase * defaultArgs;
     };
 
@@ -642,8 +688,6 @@ namespace luanatic
 
         stick::TypeID typeID() const { return m_typeID; }
 
-        virtual ClassWrapperUniquePtr clone() const = 0;
-
         // detail::ImplicitConverterUniquePtr m_implicitConverter;
         stick::TypeID m_typeID;
         stick::String m_className;
@@ -668,8 +712,6 @@ namespace luanatic
 
         template <class... Args>
         ClassWrapper & addConstructor(const stick::String & _str);
-
-        ClassWrapperUniquePtr clone() const;
 
         template <class CD>
         ClassWrapper & addBase();
@@ -819,6 +861,12 @@ namespace luanatic
 
         using Overloads = stick::DynamicArray<LuanaticFunction>;
 
+        struct EvaluatedOverload
+        {
+            LuanaticFunction function;
+            stick::Int32 defArgsToPush;
+        };
+
         inline stick::Int32 callOverloadedFunction(lua_State * _luaState)
         {
             stick::Int32 argCount = lua_gettop(_luaState);
@@ -826,20 +874,32 @@ namespace luanatic
             STICK_ASSERT(lua_isuserdata(_luaState, -1));
             Overloads * overloads = (Overloads *)lua_touserdata(_luaState, -1);
             lua_pop(_luaState, 1);
-            LuanaticFunction candidates[16];
+            EvaluatedOverload candidates[16];
+            stick::Int32 defArgsToPush = 0;
             stick::Size idx = 0;
             stick::Int32 bestScore = std::numeric_limits<stick::Int32>::max();
             for (auto it = overloads->begin(); it != overloads->end(); ++it)
             {
-                stick::Int32 score = (*it).scoreFunction(_luaState, argCount);
+                // //if there are default args for this function, push them
+                // if((*it).defaultArgs)
+                // {
+                //     stick::Int32 startIdx = (*it).argCountFunction() - (*it).defaultArgs->argCount();
+                //     startIdx = argCount - startIdx;
+
+                //     printf("DEFAULT ARG START IDX: %i\n", startIdx);
+                //     if(startIdx >= 0)
+                //         (*it).defaultArgs->push(_luaState, startIdx);
+                // }
+
+                stick::Int32 score = (*it).scoreFunction(_luaState, argCount, (*it).defaultArgs ? (*it).defaultArgs->argCount() : 0, &defArgsToPush);
                 if (score != std::numeric_limits<stick::Int32>::max()  && score == bestScore)
                 {
-                    candidates[idx++] = *it;
+                    candidates[idx++] = {*it, defArgsToPush};
                 }
                 else if (score < bestScore)
                 {
                     idx = 0;
-                    candidates[idx++] = *it;
+                    candidates[idx++] = {*it, defArgsToPush};
                     bestScore = score;
                 }
 
@@ -853,9 +913,9 @@ namespace luanatic
                 for (stick::Size i = 0; i < overloads->count(); i++)
                 {
                     if (i < overloads->count() - 1)
-                        str.append(stick::AppendVariadicFlag(), "   FU:", (*overloads)[i].signatureStrFunction(), ",\n");
+                        str.append(stick::AppendVariadicFlag(), "   ", (*overloads)[i].signatureStrFunction(), ",\n");
                     else
-                        str.append(stick::AppendVariadicFlag(), "   FU:", (*overloads)[i].signatureStrFunction(), "\n");
+                        str.append(stick::AppendVariadicFlag(), "   ", (*overloads)[i].signatureStrFunction(), "\n");
                 }
                 luaErrorWithStackTrace(_luaState, 1, "\nCould not find candidate for overloaded function, Candidates:\n%s", str.cString());
             }
@@ -865,17 +925,23 @@ namespace luanatic
                 for (stick::Int32 i = 0; i < idx; i++)
                 {
                     if (i < idx - 1)
-                        str.append(stick::AppendVariadicFlag(), "   ", candidates[i].signatureStrFunction(), ",\n");
+                        str.append(stick::AppendVariadicFlag(), "   ", candidates[i].function.signatureStrFunction(), ",\n");
                     else
-                        str.append(stick::AppendVariadicFlag(), "   ", candidates[i].signatureStrFunction(), "\n");
+                        str.append(stick::AppendVariadicFlag(), "   ", candidates[i].function.signatureStrFunction(), "\n");
                 }
                 luaErrorWithStackTrace(_luaState, 1, "\nAmbiguous call to overloaded function, Candidates:\n%s", str.cString());
             }
             else
             {
-                //call the function we found
-                return candidates[0].function(_luaState);
+                //call the function we found it, make sure to push the default arguments if any
+                if (candidates[0].function.defaultArgs && candidates[0].defArgsToPush > 0)
+                {
+                    candidates[0].function.defaultArgs->push(_luaState, candidates[0].defArgsToPush);
+                }
+                printf("DEF ARGS NEEDED: %i\n", candidates[0].defArgsToPush);
+                return candidates[0].function.function(_luaState);
             }
+
             return 0;
         }
 
@@ -923,26 +989,45 @@ namespace luanatic
                 name = _nameReplace.length() ? _nameReplace.cString()
                        : (*it).name.cString();
                 lua_getfield(_luaState, -1, name); // ... CT mT mT[name]
+
                 if (lua_isnil(_luaState, -1))
                 {
-                    lua_pushstring(_luaState, name); // ... CT mT nil name
-                    lua_pushcfunction(_luaState, (*it).function.function); // ... CT mT nil name func
-                    if (_bNiceConstructor)
-                    {
-                        lua_pushcclosure(_luaState, callConstructorNice, 1);
-                    }
-                    lua_settable(_luaState, -4); // ... CT mT nil
-                    lua_pop(_luaState, 1); // ... CT mT
-
                     //copy the function into the overloaded table (this is kinda not super memory efficient)
                     //if you don't use overloaded functions, but we need to store it somewhere, better ideas?
                     //@TODO: Better ideas that don't use this extra memory and don't compromise speed?
-                    lua_getfield(_luaState, _targetTableIndex, "__overloads"); // ... CT mT __overloads
-                    pushUnregisteredType(_luaState, Overloads()); // ... CT mT __overloads ola
+                    lua_getfield(_luaState, _targetTableIndex, "__overloads"); // ... CT mT nil __overloads
+                    pushUnregisteredType(_luaState, Overloads()); // ... CT mT nil __overloads ola
+                    lua_pushvalue(_luaState, -1); // ... CT mT nil __overloads ola ola
                     Overloads * overloads = (Overloads *)lua_touserdata(_luaState, -1);
                     overloads->append((*it).function);
-                    lua_setfield(_luaState, -2, name); // ... CT mT __overloads
-                    lua_pop(_luaState, 1); // ... CT mT
+                    lua_setfield(_luaState, -3, name); // ... CT mT nil __overloads ola
+
+                    if (!(*it).function.defaultArgs)
+                    {
+                        printf("NO DEFAULT ARGS\n");
+                        lua_pop(_luaState, 2); // ... CT mT nil
+                        lua_pushstring(_luaState, name); // ... CT mT nil name
+                        lua_pushcfunction(_luaState, (*it).function.function); // ... CT mT nil name func
+                        if (_bNiceConstructor)
+                        {
+                            lua_pushcclosure(_luaState, callConstructorNice, 1);
+                        }
+                        lua_settable(_luaState, -4); // ... CT mT nil
+                        lua_pop(_luaState, 1); // ... CT mT
+                    }
+                    else
+                    {
+                        printf("DEFAULT ARGS\n");
+                        lua_pushcclosure(_luaState, callOverloadedFunction, 1); // ... CT mT nil __overloads closure
+                        printf("DEFAULT ARGS 2\n");
+                        if (_bNiceConstructor)
+                        {
+                            lua_pushcclosure(_luaState, callConstructorNice, 1);
+                        }
+                        lua_setfield(_luaState, -4, name); // ... CT mT __overloads nil
+                        lua_pop(_luaState, 2); // ... CT mT
+                        printf("DEFAULT ARGS END\n");
+                    }
                 }
                 else
                 {
@@ -1762,6 +1847,12 @@ namespace luanatic
         }
     };
 
+    template<class F>
+    struct DefaultValue
+    {
+
+    };
+
     namespace detail
     {
         template<stick::Size N>
@@ -2103,28 +2194,32 @@ namespace luanatic
         template<class...Args>
         struct ArgScore
         {
-            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount, stick::Int32 _indexOff)
+            static stick::Int32 score(lua_State * _luaState,
+                                      stick::Int32 _argCount,
+                                      stick::Int32 _indexOff,
+                                      stick::Int32 _defaultArgCount)
             {
-                if (_argCount != sizeof...(Args))
+                if (_argCount > sizeof...(Args) || _argCount < sizeof...(Args) - _defaultArgCount)
                     return std::numeric_limits<stick::Int32>::max();
                 stick::Int32 ret = 0;
-                scoreImpl(_luaState, _indexOff, ret, make_index_sequence<sizeof...(Args)>());
+                scoreImpl(_luaState, _indexOff, ret, _argCount, make_index_sequence<sizeof...(Args)>());
                 return ret;
             }
 
         private:
 
             template<class Arg>
-            static stick::Int32 scoreHelper(lua_State * _luaState, stick::Int32 _index, stick::Int32 & _outResult)
+            static stick::Int32 scoreHelper(lua_State * _luaState, stick::Int32 _index, stick::Int32 _maxIdx, stick::Int32 & _outResult)
             {
-                _outResult += conversionScore<Arg>(_luaState, _index);
+                if (_index <= _maxIdx)
+                    _outResult += conversionScore<Arg>(_luaState, _index);
                 return _outResult;
             }
 
             template<std::size_t...N>
-            static void scoreImpl(lua_State * _luaState, stick::Int32 _indexOff, stick::Int32 & _outResult, index_sequence<N...>)
+            static void scoreImpl(lua_State * _luaState, stick::Int32 _indexOff, stick::Int32 & _outResult, stick::Int32 _maxIdx, index_sequence<N...>)
             {
-                stick::Int32 xs[] = {scoreHelper<Args>(_luaState, 1 + N + _indexOff, _outResult)...};
+                stick::Int32 xs[] = {scoreHelper<Args>(_luaState, 1 + N + _indexOff, _maxIdx, _outResult)...};
             }
         };
 
@@ -2134,14 +2229,23 @@ namespace luanatic
         template <class Ret, class... Args, Ret (*Func)(Args...), class...Policies>
         struct FunctionWrapper<Ret(*)(Args...), Func, Policies...>
         {
-            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
+            static stick::Int32 score(lua_State * _luaState,
+                                      stick::Int32 _argCount,
+                                      stick::Int32 _defaultArgCount,
+                                      stick::Int32 * _outDefaultArgsNeeded)
         {
-            return ArgScore<Args...>::score(_luaState, _argCount, 0);
+            *_outDefaultArgsNeeded = sizeof...(Args) - _argCount;
+            return ArgScore<Args...>::score(_luaState, _argCount, 0, _defaultArgCount);
         }
 
         static stick::String signatureStr()
         {
             return SignatureName<Args...>::name();
+        }
+
+        static stick::Size argCount()
+        {
+            return sizeof...(Args);
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2164,14 +2268,23 @@ namespace luanatic
         struct FunctionWrapper<void(*)(Args...), Func, Policies...>
         {
 
-            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
+            static stick::Int32 score(lua_State * _luaState,
+                                      stick::Int32 _argCount,
+                                      stick::Int32 _defaultArgCount,
+                                      stick::Int32 * _outDefaultArgsNeeded)
         {
-            return ArgScore<Args...>::score(_luaState, _argCount, 0);
+            *_outDefaultArgsNeeded = sizeof...(Args) - _argCount;
+            return ArgScore<Args...>::score(_luaState, _argCount, 0, _defaultArgCount);
         }
 
         static stick::String signatureStr()
         {
             return SignatureName<Args...>::name();
+        }
+
+        static stick::Size argCount()
+        {
+            return sizeof...(Args);
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2191,14 +2304,23 @@ namespace luanatic
         template <class Ret, class C, class... Args, Ret (C::*Func)(Args...), class...Policies>
         struct FunctionWrapper<Ret (C::*)(Args...), Func, Policies...>
         {
-            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
+            static stick::Int32 score(lua_State * _luaState,
+                                      stick::Int32 _argCount,
+                                      stick::Int32 _defaultArgCount,
+                                      stick::Int32 * _outDefaultArgsNeeded)
         {
-            return ArgScore<Args...>::score(_luaState, _argCount - 1, 1);
+            *_outDefaultArgsNeeded = sizeof...(Args) - (_argCount - 1);
+            return ArgScore<Args...>::score(_luaState, _argCount - 1, 1, _defaultArgCount);
         }
 
         static stick::String signatureStr()
         {
             return SignatureName<Args...>::name();
+        }
+
+        static stick::Size argCount()
+        {
+            return sizeof...(Args);
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2223,14 +2345,23 @@ namespace luanatic
         struct FunctionWrapper<Ret (C::*)(Args...) const, Func, Policies...>
         {
 
-            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
+            static stick::Int32 score(lua_State * _luaState,
+                                      stick::Int32 _argCount,
+                                      stick::Int32 _defaultArgCount,
+                                      stick::Int32 * _outDefaultArgsNeeded)
         {
-            return ArgScore<Args...>::score(_luaState, _argCount - 1, 1);
+            *_outDefaultArgsNeeded = sizeof...(Args) - (_argCount - 1);
+            return ArgScore<Args...>::score(_luaState, _argCount - 1, 1, _defaultArgCount);
         }
 
         static stick::String signatureStr()
         {
             return SignatureName<Args...>::name();
+        }
+
+        static stick::Size argCount()
+        {
+            return sizeof...(Args);
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2254,14 +2385,23 @@ namespace luanatic
         template <class C, class... Args, void (C::*Func)(Args...), class...Policies>
         struct FunctionWrapper<void (C::*)(Args...), Func, Policies...>
         {
-            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
+            static stick::Int32 score(lua_State * _luaState,
+                                      stick::Int32 _argCount,
+                                      stick::Int32 _defaultArgCount,
+                                      stick::Int32 * _outDefaultArgsNeeded)
         {
-            return ArgScore<Args...>::score(_luaState, _argCount - 1, 1);
+            *_outDefaultArgsNeeded = sizeof...(Args) - (_argCount - 1);
+            return ArgScore<Args...>::score(_luaState, _argCount - 1, 1, _defaultArgCount);
         }
 
         static stick::String signatureStr()
         {
             return SignatureName<Args...>::name();
+        }
+
+        static stick::Size argCount()
+        {
+            return sizeof...(Args);
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2282,14 +2422,23 @@ namespace luanatic
         template <class C, class... Args, void (C::*Func)(Args...) const, class...Policies>
         struct FunctionWrapper<void (C::*)(Args...) const, Func, Policies...>
         {
-            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
+            static stick::Int32 score(lua_State * _luaState,
+                                      stick::Int32 _argCount,
+                                      stick::Int32 _defaultArgCount,
+                                      stick::Int32 * _outDefaultArgsNeeded)
         {
-            return ArgScore<Args...>::score(_luaState, _argCount - 1, 1);
+            *_outDefaultArgsNeeded = sizeof...(Args) - (_argCount - 1);
+            return ArgScore<Args...>::score(_luaState, _argCount - 1, 1, _defaultArgCount);
         }
 
         static stick::String signatureStr()
         {
             return SignatureName<Args...>::name();
+        }
+
+        static stick::Size argCount()
+        {
+            return sizeof...(Args);
         }
 
         static stick::Int32 func(lua_State * _luaState)
@@ -2371,9 +2520,13 @@ namespace luanatic
         template <class T, class... Args>
         struct ConstructorWrapper
         {
-            static stick::Int32 score(lua_State * _luaState, stick::Int32 _argCount)
+            static stick::Int32 score(lua_State * _luaState,
+                                      stick::Int32 _argCount,
+                                      stick::Int32 _defaultArgCount,
+                                      stick::Int32 * _outDefaultArgsNeeded)
             {
-                return ArgScore<Args...>::score(_luaState, _argCount, 0);
+                *_outDefaultArgsNeeded = sizeof...(Args) - (_argCount);
+                return ArgScore<Args...>::score(_luaState, _argCount, 0, _defaultArgCount);
             }
 
             static stick::String signatureStr()
@@ -2497,9 +2650,10 @@ namespace luanatic
         }
 
         template<class T>
-        int _push(lua_State * _luaState, T _value)
+        int _push(lua_State * _luaState, stick::Int32 _startIdx, stick::Int32 _idx, T _value)
         {
-            Pusher<T>::push(_luaState, std::forward<T>(_value), NoPolicy());
+            if (_idx >= _startIdx)
+                Pusher<T>::push(_luaState, std::forward<T>(_value), NoPolicy());
             return 0;
         }
 
@@ -2515,17 +2669,20 @@ namespace luanatic
             {
             }
 
-            void push(lua_State * _state) const
+            void push(lua_State * _state, stick::Int32 _count) const final
             {
-                pushHelper(_state, make_index_sequence<sizeof...(Args)>());
-                //int tmp[] = {(int)_push<Args>(_state, std::get<Args>(values))...};
+                pushHelper(_state, sizeof...(Args) - _count, make_index_sequence<sizeof...(Args)>());
             }
 
+            stick::Size argCount() const final
+            {
+                return sizeof...(Args);
+            }
 
             template<stick::Size...N>
-            void pushHelper(lua_State * _state, index_sequence<N...>) const
+            void pushHelper(lua_State * _state, stick::Int32 _startIdx, index_sequence<N...>) const
             {
-                int tmp[] = {_push<Args>(_state, std::get<N>(values))...};
+                int tmp[] = {_push<Args>(_state, _startIdx, N, std::get<N>(values))...};
             }
 
             std::tuple<Args...> values;
@@ -2578,12 +2735,6 @@ namespace luanatic
     {
         m_statics.append({ _str, {&detail::ConstructorWrapper<T, Args...>::func, &detail::ConstructorWrapper<T, Args...>::score, &detail::ConstructorWrapper<T, Args...>::signatureStr}});
         return *this;
-    }
-
-    template <class T>
-    ClassWrapperUniquePtr ClassWrapper<T>::clone() const
-    {
-        return ClassWrapperUniquePtr(stick::defaultAllocator().create<ClassWrapper>(*this), ClassWrapperUniquePtr::Cleanup());
     }
 
     template <class T>
@@ -2882,6 +3033,7 @@ namespace luanatic
                                     LuanaticFunction _function)
         {
             STICK_ASSERT(m_state && m_type == LuaType::Table);
+            _function.defaultArgs = nullptr;
             push();
             ClassWrapperBase::NamedLuaFunctionArray tmp;
             tmp.append({ _name, _function });
@@ -2890,18 +3042,20 @@ namespace luanatic
             return *this;
         }
 
-        /*template<class...Args>
+        template<class...Args>
         LuaValue & registerFunction(const stick::String & _name,
                                     LuanaticFunction _function, Args..._args)
         {
+            printf("REGISTER DEM DEFAULT ARG FUNCTIONS\n");
             STICK_ASSERT(m_state && m_type == LuaType::Table);
             push();
+            _function.defaultArgs = stick::defaultAllocator().create<detail::DefaultArgs<Args...>>(_args...);
             ClassWrapperBase::NamedLuaFunctionArray tmp;
-            tmp.append({ _name, _function });
+            tmp.append({ _name, _function});
             detail::registerFunctions(m_state, lua_gettop(m_state), tmp);
             lua_pop(m_state, 1);
             return *this;
-        }*/
+        }
 
         template<class Ret, class...Args>
         struct CallFunctionProxy
