@@ -203,6 +203,9 @@ namespace luanatic
             virtual void push(lua_State * _state, stick::Int32 _count) const = 0;
             virtual stick::Size argCount() const = 0;
         };
+
+        template<class...Args>
+        struct DefaultArgs;
     }
 
     struct STICK_API LuanaticFunction
@@ -647,6 +650,15 @@ namespace luanatic
             return *this;
         }
 
+        template<class...Args>
+        ClassWrapperBase & addMemberFunction(const stick::String & _name,
+                                             LuanaticFunction _function, Args..._args)
+        {
+            _function.defaultArgs = stick::defaultAllocator().create<detail::DefaultArgs<Args...>>(_args...);
+            m_members.append({ _name, _function });
+            return *this;
+        }
+
         ClassWrapperBase & addMemberFunction(const stick::String & _name,
                                              lua_CFunction _function)
         {
@@ -657,6 +669,15 @@ namespace luanatic
         ClassWrapperBase & addStaticFunction(const stick::String & _name,
                                              LuanaticFunction _function)
         {
+            m_statics.append({ _name, _function });
+            return *this;
+        }
+
+        template<class...Args>
+        ClassWrapperBase & addStaticFunction(const stick::String & _name,
+                                             LuanaticFunction _function, Args..._args)
+        {
+            _function.defaultArgs = stick::defaultAllocator().create<detail::DefaultArgs<Args...>>(_args...);
             m_statics.append({ _name, _function });
             return *this;
         }
@@ -978,7 +999,7 @@ namespace luanatic
                 lua_getfield(_luaState, -1, name); // ... CT mT mT[name]
 
                 //the luastate owns the default args
-                if((*it).function.defaultArgs)
+                if ((*it).function.defaultArgs)
                     lstate->m_defaultArgStorage.append((*it).function.defaultArgs);
 
                 if (lua_isnil(_luaState, -1))
