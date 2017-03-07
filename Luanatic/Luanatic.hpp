@@ -1017,7 +1017,6 @@ namespace luanatic
 
                     if (!(*it).function.defaultArgs)
                     {
-                        printf("NO DEFAULT ARGS\n");
                         lua_pop(_luaState, 2); // ... CT mT nil
                         lua_pushstring(_luaState, name); // ... CT mT nil name
                         lua_pushcfunction(_luaState, (*it).function.function); // ... CT mT nil name func
