@@ -221,12 +221,6 @@ namespace luanatic
 
         }
 
-        ~LuanaticFunction()
-        {
-            /*if (defaultArgs)
-                stick::destroy(defaultArgs);*/
-        }
-
         lua_CFunction function;
         detail::ArgScoreFunction scoreFunction;
         detail::SignatureStrFunction signatureStrFunction;
@@ -737,6 +731,7 @@ namespace luanatic
             }
 
             stick::Allocator * m_allocator;
+            stick::DynamicArray<stick::UniquePtr<DefaultArgsBase>> m_defaultArgStorage;
             stick::HashMap<stick::TypeID, WrappedClass> m_typeIDClassMap;
         };
 
@@ -880,17 +875,6 @@ namespace luanatic
             stick::Int32 bestScore = std::numeric_limits<stick::Int32>::max();
             for (auto it = overloads->begin(); it != overloads->end(); ++it)
             {
-                // //if there are default args for this function, push them
-                // if((*it).defaultArgs)
-                // {
-                //     stick::Int32 startIdx = (*it).argCountFunction() - (*it).defaultArgs->argCount();
-                //     startIdx = argCount - startIdx;
-
-                //     printf("DEFAULT ARG START IDX: %i\n", startIdx);
-                //     if(startIdx >= 0)
-                //         (*it).defaultArgs->push(_luaState, startIdx);
-                // }
-
                 stick::Int32 score = (*it).scoreFunction(_luaState, argCount, (*it).defaultArgs ? (*it).defaultArgs->argCount() : 0, &defArgsToPush);
                 if (score != std::numeric_limits<stick::Int32>::max()  && score == bestScore)
                 {
@@ -938,7 +922,6 @@ namespace luanatic
                 {
                     candidates[0].function.defaultArgs->push(_luaState, candidates[0].defArgsToPush);
                 }
-                printf("DEF ARGS NEEDED: %i\n", candidates[0].defArgsToPush);
                 return candidates[0].function.function(_luaState);
             }
 
@@ -984,11 +967,19 @@ namespace luanatic
             }
             lua_pop(_luaState, 1);
 
+
+            LuanaticState * lstate = luanaticState(_luaState);
+            STICK_ASSERT(lstate);
+
             for (; it != _functions.end(); ++it)
             {
                 name = _nameReplace.length() ? _nameReplace.cString()
                        : (*it).name.cString();
                 lua_getfield(_luaState, -1, name); // ... CT mT mT[name]
+
+                //the luastate owns the default args
+                if((*it).function.defaultArgs)
+                    lstate->m_defaultArgStorage.append((*it).function.defaultArgs);
 
                 if (lua_isnil(_luaState, -1))
                 {
@@ -1000,6 +991,7 @@ namespace luanatic
                     lua_pushvalue(_luaState, -1); // ... CT mT nil __overloads ola ola
                     Overloads * overloads = (Overloads *)lua_touserdata(_luaState, -1);
                     overloads->append((*it).function);
+
                     lua_setfield(_luaState, -3, name); // ... CT mT nil __overloads ola
 
                     if (!(*it).function.defaultArgs)
@@ -3046,7 +3038,6 @@ namespace luanatic
         LuaValue & registerFunction(const stick::String & _name,
                                     LuanaticFunction _function, Args..._args)
         {
-            printf("REGISTER DEM DEFAULT ARG FUNCTIONS\n");
             STICK_ASSERT(m_state && m_type == LuaType::Table);
             push();
             _function.defaultArgs = stick::defaultAllocator().create<detail::DefaultArgs<Args...>>(_args...);
