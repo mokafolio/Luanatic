@@ -1029,16 +1029,13 @@ namespace luanatic
                     }
                     else
                     {
-                        printf("DEFAULT ARGS\n");
                         lua_pushcclosure(_luaState, callOverloadedFunction, 1); // ... CT mT nil __overloads closure
-                        printf("DEFAULT ARGS 2\n");
                         if (_bNiceConstructor)
                         {
                             lua_pushcclosure(_luaState, callConstructorNice, 1);
                         }
                         lua_setfield(_luaState, -4, name); // ... CT mT __overloads nil
-                        lua_pop(_luaState, 2); // ... CT mT
-                        printf("DEFAULT ARGS END\n");
+                        lua_pop(_luaState, 2); // ... CT mT g
                     }
                 }
                 else
