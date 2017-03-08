@@ -2208,10 +2208,20 @@ namespace luanatic
                                       stick::Int32 _indexOff,
                                       stick::Int32 _defaultArgCount)
             {
+                //@TODO: I think some of the arg count checks might
+                //be redundant, double check!
+                if (!_argCount)
+                {
+                    if (sizeof...(Args) - _defaultArgCount == 0)
+                        return 0;
+                    else
+                        return std::numeric_limits<stick::Int32>::max();
+                }
+
                 if (_argCount > sizeof...(Args) || _argCount < sizeof...(Args) - _defaultArgCount)
                     return std::numeric_limits<stick::Int32>::max();
                 stick::Int32 ret = 0;
-                scoreImpl(_luaState, _indexOff, ret, _argCount, make_index_sequence<sizeof...(Args)>());
+                scoreImpl(_luaState, _indexOff, ret, _argCount + 1, make_index_sequence<sizeof...(Args)>());
                 return ret;
             }
 
