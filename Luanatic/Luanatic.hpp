@@ -897,6 +897,7 @@ namespace luanatic
             for (auto it = overloads->begin(); it != overloads->end(); ++it)
             {
                 stick::Int32 score = (*it).scoreFunction(_luaState, argCount, (*it).defaultArgs ? (*it).defaultArgs->argCount() : 0, &defArgsToPush);
+                printf("SCORE for %s: %i\n", (*it).signatureStrFunction().cString(), score);
                 if (score != std::numeric_limits<stick::Int32>::max()  && score == bestScore)
                 {
                     candidates[idx++] = {*it, defArgsToPush};
@@ -2231,7 +2232,13 @@ namespace luanatic
             static stick::Int32 scoreHelper(lua_State * _luaState, stick::Int32 _index, stick::Int32 _maxIdx, stick::Int32 & _outResult)
             {
                 if (_index <= _maxIdx)
-                    _outResult += conversionScore<Arg>(_luaState, _index);
+                {
+                    auto s = conversionScore<Arg>(_luaState, _index);
+                    if(std::numeric_limits<stick::Int32>::max() - _outResult >= s)
+                        _outResult += conversionScore<Arg>(_luaState, _index);
+                    else
+                        _outResult = std::numeric_limits<stick::Int32>::max();
+                }
                 return _outResult;
             }
 
