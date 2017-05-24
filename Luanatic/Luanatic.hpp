@@ -897,7 +897,6 @@ namespace luanatic
             for (auto it = overloads->begin(); it != overloads->end(); ++it)
             {
                 stick::Int32 score = (*it).scoreFunction(_luaState, argCount, (*it).defaultArgs ? (*it).defaultArgs->argCount() : 0, &defArgsToPush);
-                printf("SCORE for %s: %i\n", (*it).signatureStrFunction().cString(), score);
                 if (score != std::numeric_limits<stick::Int32>::max()  && score == bestScore)
                 {
                     candidates[idx++] = {*it, defArgsToPush};
@@ -1519,6 +1518,7 @@ namespace luanatic
                 detail::ObjectIdentifier<WT>::identify(_luaState, _obj);
                 STICK_ASSERT(lua_type(_luaState, -1) == LUA_TLIGHTUSERDATA);
 
+                //check if we find the object in the weaktable
                 lua_pushvalue(_luaState, -1); // glua.weakTable id id
                 lua_gettable(_luaState, -3);  // glua.weakTable id objOrNil
 
