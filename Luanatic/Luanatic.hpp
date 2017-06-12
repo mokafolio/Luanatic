@@ -1966,8 +1966,9 @@ namespace luanatic
 
                 }
 
-                ReturnProxy(T * _ptr) :
+                ReturnProxy(T * _ptr, stick::Allocator * _alloc) :
                     ptr(_ptr),
+                    alloc(_alloc),
                     ref(*_ptr)
                 {
 
@@ -1984,7 +1985,7 @@ namespace luanatic
                 {
                     if (ptr)
                     {
-                        stick::destroy(ptr);
+                        alloc->destroy(ptr);
                     }
                 }
 
@@ -1997,6 +1998,7 @@ namespace luanatic
                 }
 
                 T * ptr;
+                stick::Allocator * alloc;
                 const T & ref;
             };
 
@@ -2016,7 +2018,7 @@ namespace luanatic
                     LuanaticState * ls = luanaticState(_luaState);
                     STICK_ASSERT(ls);
                     auto ptr = ls->m_allocator->create<T>(convertToValueTypeAndCheck<typename RawType<T>::Type>(_luaState, _index));
-                    return ReturnProxy(ptr);
+                    return ReturnProxy(ptr, ls->m_allocator);
                 }
             }
         };
@@ -3368,7 +3370,7 @@ namespace luanatic
                 UserData * addr = (UserData *)lua_touserdata(_luaState, 1);
                 if (addr->m_bOwnedByLua)
                 {
-                    stick::destroy(obj);
+                    state->m_allocator->destroy(obj);
                 }
             }
 
