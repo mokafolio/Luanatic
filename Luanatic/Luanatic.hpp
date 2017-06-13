@@ -1000,7 +1000,7 @@ namespace luanatic
 
                 //the luastate owns the default args
                 if ((*it).function.defaultArgs)
-                    lstate->m_defaultArgStorage.append((*it).function.defaultArgs);
+                    lstate->m_defaultArgStorage.append(stick::UniquePtr<DefaultArgsBase>((*it).function.defaultArgs, stick::defaultAllocator()));
 
                 if (lua_isnil(_luaState, -1))
                 {
@@ -1107,7 +1107,7 @@ namespace luanatic
             LuanaticState * state = luanaticState(_state);
             STICK_ASSERT(state != nullptr);
 
-            ClassWrapperUniquePtr cl(state->m_allocator->create<CW>(_wrapper));
+            ClassWrapperUniquePtr cl = stick::makeUnique<CW>(*state->m_allocator, _wrapper);
             ClassWrapperBase * rep = cl.get();
 
             //make sure all the bases are registered
