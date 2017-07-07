@@ -2236,7 +2236,7 @@ namespace luanatic
                 if (_index <= _maxIdx)
                 {
                     auto s = conversionScore<Arg>(_luaState, _index);
-                    if(std::numeric_limits<stick::Int32>::max() - _outResult >= s)
+                    if (std::numeric_limits<stick::Int32>::max() - _outResult >= s)
                         _outResult += conversionScore<Arg>(_luaState, _index);
                     else
                         _outResult = std::numeric_limits<stick::Int32>::max();
@@ -3390,28 +3390,29 @@ namespace luanatic
         static stick::Int32 luanaticNiceConstructor(lua_State * _state)
         {
             stick::Int32 argCount = lua_gettop(_state);
-            lua_newtable(_state);                       //... objInstance
-            lua_pushvalue(_state, lua_upvalueindex(1)); //... objInstance classTable
-            lua_pushvalue(_state, -1);                  //... objInstance classTable classTable
-            lua_setmetatable(_state, -3);               //... objInstance classTable
-            lua_getfield(_state, -1, "__init");         //... objInstance classTable initOrNil
+            lua_newtable(_state);                       //classTable ... objInstance
+            lua_pushvalue(_state, 1);                   //classTable ... objInstance classTable
+            lua_setmetatable(_state, -2);               //classTable ... objInstance
+            lua_insert(_state, 2);                      //classTable objInstance ...
+            lua_getfield(_state, 1, "__init");          //classTable objInstance ... initOrNil
+            lua_replace(_state, 1);                     //initOrNil objInstance ...
             if (!lua_isnil(_state, -1))
             {
                 //call the __init function
-                lua_insert(_state, 1);         //init ... objInstance classTable
-                lua_insert(_state, 1);         //classTable init ... objInstance
-                lua_insert(_state, 1);         //objInstance classTable init ...
-                lua_call(_state, argCount, 0); // objInstance classTable
-                lua_pop(_state, 1);            //objInstance
+                //@TODO: this looks like there is a lot of room for optimization :)
+                lua_pushvalue(_state, 2); //init objInstance ... objInstance
+                lua_insert(_state, 1); //objInstance init objInstance ...
+                lua_call(_state, argCount, 0); // objInstance
             }
             else
             {
                 lua_pop(_state, 2); //... objInstance
             }
+            STICK_ASSERT(lua_istable(_state, -1));
             return 1;
         }
 
-        //creates a new glua style class from lua
+        //creates a new luanatic style class from lua
         static stick::Int32 luanaticClassFunction(lua_State * _state)
         {
             lua_newtable(_state); //... classTable
