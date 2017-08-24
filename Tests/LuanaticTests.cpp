@@ -219,6 +219,17 @@ static void printCString(const char * _str)
     printf("A C STRING: %s\n", _str);
 }
 
+static Int32 valueTypeOverload(CustomValueType _a)
+{
+    return 1;
+}
+
+static Int32 valueTypeOverload(CustomValueType _a, CustomValueType _b)
+{
+    return 2;
+}
+
+
 namespace luanatic
 {
     template <>
@@ -759,6 +770,33 @@ const Suite spec[] =
             registerClass(cw).
             registerClass(dw);
 
+            EXPECT(luanatic::HasValueTypeConverter<stick::Int32>::value);
+            EXPECT(luanatic::HasValueTypeConverter<stick::String>::value);
+            EXPECT(!luanatic::HasValueTypeConverter<A>::value);
+            EXPECT(luanatic::HasValueTypeConverter<stick::DynamicArray<stick::Float32>>::value);
+
+            //Test if conversion score works properly for types that have a ValueTypeConverter implemented
+            lua_newtable(state);
+            lua_pushinteger(state, 1);
+            lua_pushnumber(state, 0.5);
+            lua_settable(state, -3);
+            lua_pushinteger(state, 2);
+            lua_pushnumber(state, 1.5);
+            lua_settable(state, -3);
+            EXPECT(lua_istable(state, -1));
+            EXPECT(luanatic::conversionScore<stick::DynamicArray<stick::Float32>>(state, -1) == 1);
+            lua_pop(state, 1);
+
+            // test if overloads using value type converters are resolved as expected.
+            globals.
+            registerFunction("valueTypeOverload", LUANATIC_FUNCTION_OVERLOAD(int(*)(CustomValueType), &valueTypeOverload)).
+            registerFunction("valueTypeOverload", LUANATIC_FUNCTION_OVERLOAD(int(*)(CustomValueType, CustomValueType), &valueTypeOverload));
+            Int32 ra = globals.callFunction<Int32>("valueTypeOverload", CustomValueType());
+            EXPECT(ra == 1);
+            Int32 ra2 = globals.callFunction<Int32>("valueTypeOverload", CustomValueType(), CustomValueType());
+            EXPECT(ra2 == 2);
+            auto err = luanatic::execute(state, "local a = valueTypeOverload({3, 99}) assert(a == 1) local b = valueTypeOverload({3, 99}, {2, 1}) assert(b == 2)");
+            EXPECT(!err);
 
             //Test if conversion score works properly for custom types
             globals["test"].set(E(0.1, 0.2, 0.3));
@@ -770,7 +808,6 @@ const Suite spec[] =
             EXPECT(luanatic::conversionScore<const B *>(state, -1) == std::numeric_limits<stick::Int32>::max());
             EXPECT(luanatic::conversionScore<CoolClass &>(state, -1) == 1);
             EXPECT(luanatic::conversionScore<const E>(state, -1) == 0);
-
 
             //test conversion scoring for basic types
             lua_pushinteger(state, 3);

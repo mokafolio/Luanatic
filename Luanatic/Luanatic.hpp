@@ -231,9 +231,19 @@ namespace luanatic
         detail::DefaultArgsBase * defaultArgs;
     };
 
+    template <class T, std::size_t = sizeof(T)>
+    std::true_type IsCompleteImpl(T *);
+
+    std::false_type IsCompleteImpl(...);
+
+    template <class T>
+    using IsComplete = decltype(IsCompleteImpl(std::declval<T *>()));
+
     template <class U, class Enable = void>
     struct ValueTypeConverter
     {
+        static constexpr bool __defaultConverterImpl = true;
+
         static U convertAndCheck(lua_State * _state, stick::Int32 _index)
         {
             detail::luaErrorWithStackTrace(_state, _index, "No ValueTypeConverter implementation found.");
@@ -489,6 +499,20 @@ namespace luanatic
                 lua_setfield(_state, -2, "category");
             }
         }
+    };
+
+    template<class T>
+    class HasValueTypeConverter
+    {
+        template < class U, class = typename std::enable_if < !std::is_member_pointer<decltype(&ValueTypeConverter<U>::__defaultConverterImpl)>::value >::type >
+        static std::false_type check(int);
+
+        template <class>
+        static std::true_type check(...);
+
+    public:
+
+        static constexpr bool value = decltype(check<T>(0))::value;
     };
 
     /*
@@ -896,13 +920,16 @@ namespace luanatic
             stick::Int32 bestScore = std::numeric_limits<stick::Int32>::max();
             for (auto it = overloads->begin(); it != overloads->end(); ++it)
             {
+                printf("RESOLVING OVERLOAD %i\n", idx);
                 stick::Int32 score = (*it).scoreFunction(_luaState, argCount, (*it).defaultArgs ? (*it).defaultArgs->argCount() : 0, &defArgsToPush);
                 if (score != std::numeric_limits<stick::Int32>::max()  && score == bestScore)
                 {
+                    printf("A\n");
                     candidates[idx++] = {*it, defArgsToPush};
                 }
                 else if (score < bestScore)
                 {
+                    printf("B\n");
                     idx = 0;
                     candidates[idx++] = {*it, defArgsToPush};
                     bestScore = score;
@@ -1321,6 +1348,14 @@ namespace luanatic
         {
             static stick::Int32 score(lua_State * _luaState, stick::Int32 _index)
             {
+                //@TODO: Check if we need to return a different value if a value type
+                // converter exists to avoid ambiguities.
+                //@TODO: HasValueTypeConverter will return true for any DynamicArray
+                //without checking for the type that is requested. There should be
+                //some check to validate that the requested type inside the DynamicArray
+                //can be converted, too.
+                if (HasValueTypeConverter<T>::value)
+                    return 1;
                 return std::numeric_limits<stick::Int32>::max();
             }
         };
@@ -1416,17 +1451,21 @@ namespace luanatic
     template <class T>
     inline stick::Int32 conversionScore(lua_State * _luaState, stick::Int32 _index)
     {
+        printf("CONVERSION SCORE\n");
         using RT = typename detail::RawType<T>::Type;
         if (!lua_isuserdata(_luaState, _index))
         {
+            printf("FOOOCK\n");
             return detail::LuaTypeScore<RT>::score(_luaState, _index);
         }
         else if (isOfType<RT>(_luaState, _index, true))
         {
+            printf("FOOOCK2\n");
             return 0;
         }
         else
         {
+            printf("FOOOCK3\n");
             detail::UserData * pud = static_cast<detail::UserData *>(lua_touserdata(_luaState, _index));
             detail::LuanaticState * glua = detail::luanaticState(_luaState);
             STICK_ASSERT(glua != nullptr);
@@ -1493,6 +1532,7 @@ namespace luanatic
     inline T convertToValueTypeAndCheck(lua_State * _luaState, stick::Int32 _index)
     {
         // check if we can simply make a copy
+        // @TODO: Provide a way to skip this (i.e. ValueTypeConverter allready does this step)
         T * other = convertToType<T>(_luaState, _index);
         if (other)
         {
@@ -1954,6 +1994,29 @@ namespace luanatic
             }
         };
 
+        //helper to only forward to ValueTypeConverter for const reference types
+        //if the type has a default constructor
+        template<class T, class Enable = void>
+        struct ConverterHelper
+        {
+            static const T * convert(lua_State * _luaState, stick::Int32 _index, LuanaticState * _lnstate)
+            {
+                //Try implicitly converting from lua, we need the return proxy to clean up
+                //the tmp memory we need for this.
+                auto ptr = _lnstate->m_allocator->create<T>(convertToValueTypeAndCheck<typename RawType<T>::Type>(_luaState, _index));
+                return ptr;
+            }
+        };
+
+        template<class T>
+        struct ConverterHelper<T, typename std::enable_if<!std::is_default_constructible<T>::value>::type>
+        {
+            static const T * convert(lua_State * _luaState, stick::Int32 _index, LuanaticState * _lnstate)
+            {
+                return nullptr;
+            }
+        };
+
         template <class T>
         struct Converter<const T &>
         {
@@ -1966,7 +2029,7 @@ namespace luanatic
 
                 }
 
-                ReturnProxy(T * _ptr, stick::Allocator * _alloc) :
+                ReturnProxy(const T * _ptr, stick::Allocator * _alloc) :
                     ptr(_ptr),
                     alloc(_alloc),
                     ref(*_ptr)
@@ -1997,7 +2060,7 @@ namespace luanatic
                     return ref;
                 }
 
-                T * ptr;
+                const T * ptr;
                 stick::Allocator * alloc;
                 const T & ref;
             };
@@ -2017,8 +2080,8 @@ namespace luanatic
                     //the tmp memory we need for this.
                     LuanaticState * ls = luanaticState(_luaState);
                     STICK_ASSERT(ls);
-                    auto ptr = ls->m_allocator->create<T>(convertToValueTypeAndCheck<typename RawType<T>::Type>(_luaState, _index));
-                    return ReturnProxy(ptr, ls->m_allocator);
+                    // auto ptr = ls->m_allocator->create<T>(convertToValueTypeAndCheck<typename RawType<T>::Type>(_luaState, _index));
+                    return ReturnProxy(ConverterHelper<T>::convert(_luaState, _index, ls), ls->m_allocator);
                 }
             }
         };
@@ -2211,18 +2274,22 @@ namespace luanatic
                                       stick::Int32 _indexOff,
                                       stick::Int32 _defaultArgCount)
             {
+                printf("WOOOOP\n");
                 //@TODO: I think some of the arg count checks might
                 //be redundant, double check!
                 if (!_argCount)
                 {
+                    printf(":&\n");
                     if (sizeof...(Args) - _defaultArgCount == 0)
                         return 0;
                     else
                         return std::numeric_limits<stick::Int32>::max();
                 }
 
+                printf("PREEEE %lu %lu %lu\n", _argCount, sizeof...(Args), _defaultArgCount);
                 if (_argCount > sizeof...(Args) || _argCount < sizeof...(Args) - _defaultArgCount)
                     return std::numeric_limits<stick::Int32>::max();
+                printf(":&2\n");
                 stick::Int32 ret = 0;
                 scoreImpl(_luaState, _indexOff, ret, _argCount + 1, make_index_sequence<sizeof...(Args)>());
                 return ret;
@@ -2914,6 +2981,21 @@ namespace luanatic
             return getChild(_key);
         }
 
+        //@TODO: Rename and make private
+        template<class T, class Policy>
+        void setImpl(T && _value, const Policy & _policy)
+        {
+            detail::PickPusher<T>::push(m_state, std::forward<T>(_value), _policy);
+        }
+
+        //@TODO: Rename and make private
+        //overload to handle set for another LuaValue
+        template<class Policy>
+        void setImpl(LuaValue & _value, const Policy & _policy)
+        {
+            _value.push();
+        }
+
         template <class T, class Policy = detail::NoPolicy >
         void set(T && _value, const Policy & _policy = Policy())
         {
@@ -2930,7 +3012,8 @@ namespace luanatic
                 //push the table key onto the stack
                 lua_pushvalue(m_state, m_keyIndex);
                 //push the new value onto the stack
-                detail::PickPusher<T>::push(m_state, std::forward<T>(_value), _policy);
+                // detail::PickPusher<T>::push(m_state, std::forward<T>(_value), _policy);
+                setImpl(std::forward<T>(_value), _policy);
                 //init
                 init();
                 //push the new value onto the stack again
@@ -2944,7 +3027,8 @@ namespace luanatic
             {
                 reset();
                 //_policy.template push<T>(m_state, std::forward<T>(_value));
-                detail::PickPusher<T>::push(m_state, std::forward<T>(_value), _policy);
+                // detail::PickPusher<T>::push(m_state, std::forward<T>(_value), _policy);
+                setImpl(std::forward<T>(_value), _policy);
                 //create the reference, determine type and pop value
                 init();
             }
@@ -2959,6 +3043,7 @@ namespace luanatic
             return detail::convert<T>(m_state, -1);
         }
 
+        //@TODO: Rename to child
         template <class K>
         LuaValue getChild(K && _key)
         {
