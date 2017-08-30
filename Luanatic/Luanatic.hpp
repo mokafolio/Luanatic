@@ -920,16 +920,13 @@ namespace luanatic
             stick::Int32 bestScore = std::numeric_limits<stick::Int32>::max();
             for (auto it = overloads->begin(); it != overloads->end(); ++it)
             {
-                printf("RESOLVING OVERLOAD %i\n", idx);
                 stick::Int32 score = (*it).scoreFunction(_luaState, argCount, (*it).defaultArgs ? (*it).defaultArgs->argCount() : 0, &defArgsToPush);
                 if (score != std::numeric_limits<stick::Int32>::max()  && score == bestScore)
                 {
-                    printf("A\n");
                     candidates[idx++] = {*it, defArgsToPush};
                 }
                 else if (score < bestScore)
                 {
-                    printf("B\n");
                     idx = 0;
                     candidates[idx++] = {*it, defArgsToPush};
                     bestScore = score;
@@ -1347,7 +1344,7 @@ namespace luanatic
         struct LuaTypeScore
         {
             static stick::Int32 score(lua_State * _luaState, stick::Int32 _index)
-            {
+            {   
                 //@TODO: Check if we need to return a different value if a value type
                 // converter exists to avoid ambiguities.
                 //@TODO: HasValueTypeConverter will return true for any DynamicArray
@@ -1451,21 +1448,17 @@ namespace luanatic
     template <class T>
     inline stick::Int32 conversionScore(lua_State * _luaState, stick::Int32 _index)
     {
-        printf("CONVERSION SCORE\n");
         using RT = typename detail::RawType<T>::Type;
         if (!lua_isuserdata(_luaState, _index))
         {
-            printf("FOOOCK\n");
             return detail::LuaTypeScore<RT>::score(_luaState, _index);
         }
         else if (isOfType<RT>(_luaState, _index, true))
         {
-            printf("FOOOCK2\n");
             return 0;
         }
         else
         {
-            printf("FOOOCK3\n");
             detail::UserData * pud = static_cast<detail::UserData *>(lua_touserdata(_luaState, _index));
             detail::LuanaticState * glua = detail::luanaticState(_luaState);
             STICK_ASSERT(glua != nullptr);
@@ -2274,22 +2267,18 @@ namespace luanatic
                                       stick::Int32 _indexOff,
                                       stick::Int32 _defaultArgCount)
             {
-                printf("WOOOOP\n");
                 //@TODO: I think some of the arg count checks might
                 //be redundant, double check!
                 if (!_argCount)
                 {
-                    printf(":&\n");
                     if (sizeof...(Args) - _defaultArgCount == 0)
                         return 0;
                     else
                         return std::numeric_limits<stick::Int32>::max();
                 }
 
-                printf("PREEEE %lu %lu %lu\n", _argCount, sizeof...(Args), _defaultArgCount);
                 if (_argCount > sizeof...(Args) || _argCount < sizeof...(Args) - _defaultArgCount)
                     return std::numeric_limits<stick::Int32>::max();
-                printf(":&2\n");
                 stick::Int32 ret = 0;
                 scoreImpl(_luaState, _indexOff, ret, _argCount + 1, make_index_sequence<sizeof...(Args)>());
                 return ret;
