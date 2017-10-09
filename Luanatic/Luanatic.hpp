@@ -239,6 +239,37 @@ namespace luanatic
     template <class T>
     using IsComplete = decltype(IsCompleteImpl(std::declval<T *>()));
 
+    namespace detail
+    {
+        template<class U, class Enable = void>
+        struct DefaultValueTypeConverterImpl
+        {
+            static U convertAndCheck(lua_State * _state, stick::Int32 _index)
+            {
+                detail::luaErrorWithStackTrace(_state, _index, "No ValueTypeConverter implementation found.");
+                return U();
+            }
+
+            static void push(lua_State * _state, const U & _value)
+            {
+                luaL_error(_state, "No ValueTypeConverter implementation found to push.");
+            }
+        };
+
+        template<class U>
+        struct DefaultValueTypeConverterImpl<U, typename std::enable_if < std::is_copy_constructible<U>::value>::type>
+        {
+            static U convertAndCheck(lua_State * _state, stick::Int32 _index)
+            {
+                detail::luaErrorWithStackTrace(_state, _index, "No ValueTypeConverter implementation found.");
+                return U();
+            }
+
+            //implemented further down, as we need detail::LuanaticState for memory allocation
+            static void push(lua_State * _state, const U & _value);
+        };
+    }
+
     template <class U, class Enable = void>
     struct ValueTypeConverter
     {
@@ -246,12 +277,28 @@ namespace luanatic
 
         static U convertAndCheck(lua_State * _state, stick::Int32 _index)
         {
+            return detail::DefaultValueTypeConverterImpl<U>::convertAndCheck(_state, _index);
+        }
+
+        //implemented further down, as we need detail::LuanaticState for memory allocation
+        static void push(lua_State * _state, const U & _value)
+        {
+            detail::DefaultValueTypeConverterImpl<U>::push(_state, _value);
+        }
+    };
+
+    template <class U>
+    struct ValueTypeConverter<stick::UniquePtr<U>>
+    {
+        static U convertAndCheck(lua_State * _state, stick::Int32 _index)
+        {
+            //hmmmm? Not sure if this is the way to go in this case.
             detail::luaErrorWithStackTrace(_state, _index, "No ValueTypeConverter implementation found.");
             return U();
         }
 
         //implemented further down, as we need detail::LuanaticState for memory allocation
-        static void push(lua_State * _state, const U & _value);
+        static void push(lua_State * _state, const stick::UniquePtr<U> & _value);
     };
 
     template <>
@@ -515,6 +562,23 @@ namespace luanatic
         static constexpr bool value = decltype(check<T>(0))::value;
     };
 
+    /*template<class T>
+    struct ValueTypeConverter < T, typename std::enable_if < std::is_copy_constructible<T>::value &&
+        !HasValueTypeConverter<T>::value >::type >
+    {
+        static constexpr bool __defaultConverterImpl = true;
+        static constexpr bool __defaultConverterImplTwo = true;
+
+        static T convertAndCheck(lua_State * _state, stick::Int32 _index)
+        {
+            detail::luaErrorWithStackTrace(_state, _index, "No ValueTypeConverter implementation found.");
+            return T();
+        }
+
+        //implemented further down, as we need detail::LuanaticState for memory allocation
+        static void push(lua_State * _state, const T & _value);
+    };*/
+
     /*
     template<class T>
     struct ValueTypeConverter<stick::DynamicArray<T *> >
@@ -607,12 +671,23 @@ namespace luanatic
             CastFunction m_cast;
         };
 
+        //@TODO: make a simplified TypeCaster that is exposed to allow
+        //casts from custom wrappers in an easy way.
         template <class From, class To>
         struct TypeCaster
         {
             static UserData cast(const UserData & _ud, detail::LuanaticState & _state)
             {
                 return {static_cast<To *>(static_cast<From *>(_ud.m_data)), _ud.m_bOwnedByLua, stick::TypeInfoT<To>::typeID()};
+            }
+        };
+
+        template <class From, class To>
+        struct TypeCaster<stick::UniquePtr<From>, To>
+        {
+            static UserData cast(const UserData & _ud, detail::LuanaticState & _state)
+            {
+                return {(To *)static_cast<stick::UniquePtr<From> *>(_ud.m_data)->get(), _ud.m_bOwnedByLua, stick::TypeInfoT<To>::typeID()};
             }
         };
     }
@@ -650,6 +725,8 @@ namespace luanatic
             , m_statics(_other.m_statics)
             , m_attributes(_other.m_attributes)
         {
+            // if (_other.m_storageWrapperTmp)
+            //     m_storageWrapperTmp = _other.m_storageWrapperTmp->clone();
         }
 
         ClassWrapperBase & operator=(const ClassWrapperBase & _other)
@@ -661,6 +738,9 @@ namespace luanatic
             m_attributes = _other.m_attributes;
             m_bases = _other.m_bases;
             m_casts = _other.m_casts;
+
+            // if (_other.m_storageWrapperTmp)
+            //     m_storageWrapperTmp = _other.m_storageWrapperTmp->clone();
 
             return *this;
         }
@@ -727,8 +807,10 @@ namespace luanatic
 
         stick::TypeID typeID() const { return m_typeID; }
 
-        // detail::ImplicitConverterUniquePtr m_implicitConverter;
+        // virtual ClassWrapperUniquePtr clone() const = 0;
+
         stick::TypeID m_typeID;
+        stick::TypeID m_storageTypeID; //used for custom wrappers around the obj
         stick::String m_className;
         NamedLuaFunctionArray m_members;
         NamedLuaFunctionArray m_statics;
@@ -736,6 +818,8 @@ namespace luanatic
         NamedLuaFunctionArray m_constructors;
         BaseArray m_bases;
         CastArray m_casts;
+        //used if StorageT is not detail::RawPointerStorageFlag (see ClassWrapper) to describe the kind of storage and casts
+        // ClassWrapperUniquePtr m_storageWrapperTmp; //this is only used before the class is registered to store the storage wrapper
     };
 
     template <class T>
@@ -745,6 +829,8 @@ namespace luanatic
         using ClassType = T;
 
         ClassWrapper(const stick::String & _name);
+
+        // ~ClassWrapper();
 
         template<class...Args>
         ClassWrapper & addConstructor();
@@ -757,10 +843,17 @@ namespace luanatic
 
         template <class CD>
         ClassWrapper & addCast();
+
+        // ClassWrapperUniquePtr clone() const final
+        // {
+        //     //we just use default allocator here for now...
+        //     return stick::makeUnique<ClassWrapper>(stick::defaultAllocator(), *this);
+        // }
     };
 
     namespace detail
     {
+        //@TODO: LuanaticState should be STICK_API and in main namespace
         struct STICK_LOCAL LuanaticState
         {
             struct WrappedClass
@@ -1280,15 +1373,27 @@ namespace luanatic
         }
     }
 
-    template <class U, class Enable>
-    void ValueTypeConverter<U, Enable>::push(lua_State * _state, const U & _value)
+    namespace detail
     {
-        //By default we try pushing this as if it was a registered type,
-        //hoping that it will succeed.
+        template <class U>
+        void DefaultValueTypeConverterImpl < U, typename std::enable_if < std::is_copy_constructible<U>::value>::type >::push(lua_State * _state, const U & _value)
+        {
+            //By default we try pushing this as if it was a registered type,
+            //hoping that it will succeed.
+            detail::LuanaticState * state = detail::luanaticState(_state);
+            STICK_ASSERT(state);
+            luanatic::push(_state, state->m_allocator->create<U>(_value), true);
+        }
+    }
+
+    template <class U>
+    void ValueTypeConverter <stick::UniquePtr<U>>::push(lua_State * _state, const stick::UniquePtr<U> & _value)
+    {
         detail::LuanaticState * state = detail::luanaticState(_state);
         STICK_ASSERT(state);
-        luanatic::push(_state, state->m_allocator->create<U>(_value), true);
-        //luaL_error(_state, "No ValueTypeConverter implementation found");
+        //damn...this const cast feels hella sketchy let's see if we can come up with a better way to push
+        //unique pointers from value. (I think this might be as good as it gets)
+        luanatic::push(_state, state->m_allocator->create<stick::UniquePtr<U>>(std::move(const_cast<stick::UniquePtr<U>&>(_value))), true);
     }
 
     template <class T>
@@ -1344,7 +1449,7 @@ namespace luanatic
         struct LuaTypeScore
         {
             static stick::Int32 score(lua_State * _luaState, stick::Int32 _index)
-            {   
+            {
                 //@TODO: Check if we need to return a different value if a value type
                 // converter exists to avoid ambiguities.
                 //@TODO: HasValueTypeConverter will return true for any DynamicArray
@@ -2002,7 +2107,7 @@ namespace luanatic
         };
 
         template<class T>
-        struct ConverterHelper<T, typename std::enable_if<!std::is_default_constructible<T>::value>::type>
+        struct ConverterHelper < T, typename std::enable_if < !std::is_default_constructible<T>::value >::type >
         {
             static const T * convert(lua_State * _luaState, stick::Int32 _index, LuanaticState * _lnstate)
             {
@@ -2805,6 +2910,13 @@ namespace luanatic
     {
     }
 
+    // template <class T>
+    // ClassWrapper<T>::~ClassWrapper()
+    // {
+    //     for (auto * wrapper : m_wrappers)
+    //         stick::defaultAllocator().destroy(wrapper);
+    // }
+
     template <class T>
     template <class... Args>
     ClassWrapper<T> & ClassWrapper<T>::addConstructor()
@@ -2837,6 +2949,16 @@ namespace luanatic
         m_casts.append(detail::UserDataCastFunction(stick::TypeInfoT<B>::typeID(), detail::TypeCaster<T, B>::cast));
         return *this;
     }
+
+    // template <class T>
+    // template <class B>
+    // ClassWrapper<T> & ClassWrapper<T>::addWrapper()
+    // {
+    //     auto * obj = stick::defaultAllocator().create<ClassWrapper<B>>(stick::String::concat(m_className, typeid(B).name(), "Wrapper"));
+    //     obj->template addBase<T>();
+    //     m_wrappers.append(obj);
+    //     return *this;
+    // }
 
 
     struct STICK_API NoDestructorFlag {};
@@ -3113,6 +3235,21 @@ namespace luanatic
             detail::registerClass<CW, false>(m_state, _wrapper);
             lua_pop(m_state, 1);
             return *this;
+        }
+
+        template <class A, class B>
+        LuaValue & addWrapper()
+        {
+            /*detail::LuanaticState * glua = detail::luanaticState(_luaState);
+            STICK_ASSERT(glua != nullptr);
+            auto it = glua->m_typeIDClassMap.find(stick::TypeInfoT<A>::typeID());
+            if(it == glua->m_typeIDClassMap.end())
+            {
+
+            }*/
+            ClassWrapper<B> wrapper(stick::String::concat(typeid(A).name(), typeid(B).name(), "Wrapper"));
+            wrapper.template addBase<A>();
+            return registerClass(wrapper);
         }
 
         // @TODO: Not sure if we should keep this overload as

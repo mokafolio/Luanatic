@@ -190,6 +190,8 @@ struct E : public CoolClass
 
     }
 
+    E(const E &) = default;
+
     virtual ~E()
     {
         printf("DESTRUCT D\n");
@@ -227,6 +229,57 @@ static Int32 valueTypeOverload(CustomValueType _a)
 static Int32 valueTypeOverload(CustomValueType _a, CustomValueType _b)
 {
     return 2;
+}
+
+class WrappedClass
+{
+public:
+
+    WrappedClass() = default;
+
+    WrappedClass(const WrappedClass &) = default;
+
+    Int32 number() const
+    {
+        return 45;
+    }
+};
+
+template<class T>
+class Wrapper
+{
+public:
+
+    Wrapper() = default;
+
+    Wrapper(const Wrapper &) = default;
+
+    T wrpd;
+};
+
+namespace luanatic
+{
+    namespace detail
+    {
+        template <class From, class To>
+        struct TypeCaster<Wrapper<From>, To>
+        {
+            static UserData cast(const UserData & _ud, detail::LuanaticState & _state)
+            {
+                return {(To *) & static_cast<Wrapper<From> *>(_ud.m_data)->wrpd, _ud.m_bOwnedByLua, stick::TypeInfoT<To>::typeID()};
+            }
+        };
+    }
+}
+
+static Wrapper<WrappedClass> createWrappedClass()
+{
+    return Wrapper<WrappedClass>();
+}
+
+static stick::UniquePtr<WrappedClass> createWrappedUniquePtrClass()
+{
+    return stick::makeUnique<WrappedClass>(stick::defaultAllocator());
 }
 
 
@@ -795,10 +848,13 @@ const Suite spec[] =
             EXPECT(ra == 1);
             Int32 ra2 = globals.callFunction<Int32>("valueTypeOverload", CustomValueType(), CustomValueType());
             EXPECT(ra2 == 2);
+            STICK_ASSERT(luanatic::HasValueTypeConverter<CustomValueType>::value);
             auto err = luanatic::execute(state, "local a = valueTypeOverload({3, 99}) assert(a == 1) local b = valueTypeOverload({3, 99}, {2, 1}) assert(b == 2)");
             EXPECT(!err);
 
             //Test if conversion score works properly for custom types
+            EXPECT(!luanatic::HasValueTypeConverter<E>::value);
+            EXPECT(std::is_copy_constructible<E>::value);
             globals["test"].set(E(0.1, 0.2, 0.3));
             luanatic::LuaValue t = globals["test"];
             t.push();
@@ -921,6 +977,37 @@ const Suite spec[] =
             EXPECT(std::strcmp(luaL_checkstring(state, -1), "test") == 0);
 
             lua_pop(state, 3);
+        }
+        EXPECT(lua_gettop(state) == 0);
+        lua_close(state);
+    },
+    SUITE("Wrapped Class Tests")
+    {
+        lua_State * state = luanatic::createLuaState();
+        {
+            luanatic::openStandardLibraries(state);
+            luanatic::initialize(state);
+            luanatic::LuaValue globals = luanatic::globalsTable(state);
+
+            luanatic::ClassWrapper<WrappedClass> aw("WrappedClass");
+            aw.
+            addConstructor<>().
+            addMemberFunction("number", LUANATIC_FUNCTION(&WrappedClass::number));
+
+            globals.registerClass(aw);
+            globals.addWrapper<WrappedClass, Wrapper<WrappedClass>>();
+            globals.addWrapper<WrappedClass, stick::UniquePtr<WrappedClass>>();
+            globals.registerFunction("createWrappedClass", LUANATIC_FUNCTION(&createWrappedClass));
+            globals.registerFunction("createWrappedUniquePtrClass", LUANATIC_FUNCTION(&createWrappedUniquePtrClass));
+
+            //@TODO: Write a better test...
+            String luaCode = "local a = createWrappedClass()\n"
+                             "local b = createWrappedUniquePtrClass()\n"
+                             "assert(a) assert(b)\n";
+
+            auto err = luanatic::execute(state, luaCode);
+            if (err)
+                printf("%s\n", err.message().cString());
         }
         EXPECT(lua_gettop(state) == 0);
         lua_close(state);
