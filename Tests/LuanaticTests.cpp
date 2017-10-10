@@ -282,6 +282,16 @@ static stick::UniquePtr<WrappedClass> createWrappedUniquePtrClass()
     return stick::makeUnique<WrappedClass>(stick::defaultAllocator());
 }
 
+static stick::Result<stick::Int32> returnValidResult()
+{
+    return 65;
+}
+
+static stick::Result<stick::Int32> returnInvalidResult()
+{
+    return stick::Error(stick::ec::InvalidOperation, "Something went wrong.", STICK_FILE, STICK_LINE);
+}
+
 
 namespace luanatic
 {
@@ -309,7 +319,7 @@ namespace luanatic
             return CustomValueType();
         }
 
-        static void push(lua_State * _state, const CustomValueType & _value)
+        static stick::Int32 push(lua_State * _state, const CustomValueType & _value)
         {
             lua_newtable(_state);
             lua_pushinteger(_state, 1);
@@ -318,6 +328,7 @@ namespace luanatic
             lua_pushinteger(_state, 2);
             lua_pushinteger(_state, _value.b);
             lua_settable(_state, -3);
+            return 1;
         }
     };
 }
@@ -1006,6 +1017,32 @@ const Suite spec[] =
                              "assert(a) assert(b)\n";
 
             auto err = luanatic::execute(state, luaCode);
+            if (err)
+                printf("%s\n", err.message().cString());
+        }
+        EXPECT(lua_gettop(state) == 0);
+        lua_close(state);
+    },
+    SUITE("Result push Tests")
+    {
+        lua_State * state = luanatic::createLuaState();
+        {
+            luanatic::openStandardLibraries(state);
+            luanatic::initialize(state);
+            luanatic::LuaValue globals = luanatic::globalsTable(state);
+
+            globals.registerFunction("returnValidResult", LUANATIC_FUNCTION(&returnValidResult));
+            globals.registerFunction("returnInvalidResult", LUANATIC_FUNCTION(&returnInvalidResult));
+
+            //@TODO: Write a better test...
+            String luaCode = "local a = returnValidResult()\n"
+                             "assert(a == 65)\n"
+                             "local b, err = returnInvalidResult()\n"
+                             "print(b, err)\n"
+                             "assert(not b)\n";
+
+            auto err = luanatic::execute(state, luaCode);
+            EXPECT(!err);
             if (err)
                 printf("%s\n", err.message().cString());
         }

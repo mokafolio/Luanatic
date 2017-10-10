@@ -8,6 +8,7 @@
 #include <Stick/TypeInfo.hpp>
 #include <Stick/UniquePtr.hpp>
 #include <Stick/Maybe.hpp>
+#include <Stick/Result.hpp>
 
 #include <type_traits>
 #include <functional> //for std::ref
@@ -112,7 +113,7 @@ namespace luanatic
     inline bool push(lua_State * _luaState, const T * _obj, bool _bLuaOwnsObject = true);
 
     template <class T>
-    inline void pushValueType(lua_State * _luaState, const T & _value);
+    inline stick::Int32 pushValueType(lua_State * _luaState, const T & _value);
 
     template <class T, class ... Args>
     inline void constructUnregisteredType(lua_State * _luaState, Args ... _args);
@@ -250,9 +251,10 @@ namespace luanatic
                 return U();
             }
 
-            static void push(lua_State * _state, const U & _value)
+            static stick::Int32 push(lua_State * _state, const U & _value)
             {
                 luaL_error(_state, "No ValueTypeConverter implementation found to push.");
+                return 1;
             }
         };
 
@@ -266,7 +268,7 @@ namespace luanatic
             }
 
             //implemented further down, as we need detail::LuanaticState for memory allocation
-            static void push(lua_State * _state, const U & _value);
+            static stick::Int32 push(lua_State * _state, const U & _value);
         };
     }
 
@@ -281,9 +283,9 @@ namespace luanatic
         }
 
         //implemented further down, as we need detail::LuanaticState for memory allocation
-        static void push(lua_State * _state, const U & _value)
+        static stick::Int32 push(lua_State * _state, const U & _value)
         {
-            detail::DefaultValueTypeConverterImpl<U>::push(_state, _value);
+            return detail::DefaultValueTypeConverterImpl<U>::push(_state, _value);
         }
     };
 
@@ -298,7 +300,7 @@ namespace luanatic
         }
 
         //implemented further down, as we need detail::LuanaticState for memory allocation
-        static void push(lua_State * _state, const stick::UniquePtr<U> & _value);
+        static stick::Int32 push(lua_State * _state, const stick::UniquePtr<U> & _value);
     };
 
     template <>
@@ -309,9 +311,10 @@ namespace luanatic
             return lua_toboolean(_state, _index) == 1;
         }
 
-        static void push(lua_State * _state, const bool & _value)
+        static stick::Int32 push(lua_State * _state, const bool & _value)
         {
             lua_pushboolean(_state, _value);
+            return 1;
         }
     };
 
@@ -324,9 +327,10 @@ namespace luanatic
             return static_cast<stick::Int32>(luaL_checkinteger(_luaState, _index));
         }
 
-        static void push(lua_State * _luaState, const stick::Int32 & _value)
+        static stick::Int32 push(lua_State * _luaState, const stick::Int32 & _value)
         {
             lua_pushinteger(_luaState, _value);
+            return 1;
         }
     };
 
@@ -339,9 +343,10 @@ namespace luanatic
             return static_cast<stick::Int16>(luaL_checkinteger(_luaState, _index));
         }
 
-        static void push(lua_State * _luaState, const stick::Int16 & _value)
+        static stick::Int32 push(lua_State * _luaState, const stick::Int16 & _value)
         {
             lua_pushinteger(_luaState, _value);
+            return 1;
         }
     };
 
@@ -354,9 +359,10 @@ namespace luanatic
             return static_cast<stick::UInt32>(luaL_checkinteger(_luaState, _index));
         }
 
-        static void push(lua_State * _luaState, const stick::UInt32 & _value)
+        static stick::Int32 push(lua_State * _luaState, const stick::UInt32 & _value)
         {
             lua_pushinteger(_luaState, _value);
+            return 1;
         }
     };
 
@@ -370,9 +376,10 @@ namespace luanatic
                        luaL_checkinteger(_luaState, _index));
         }
 
-        static void push(lua_State * _luaState, const stick::Size & _value)
+        static stick::Int32 push(lua_State * _luaState, const stick::Size & _value)
         {
             lua_pushinteger(_luaState, _value);
+            return 1;
         }
     };
 
@@ -384,9 +391,10 @@ namespace luanatic
             return static_cast<stick::Float32>(luaL_checknumber(_luaState, _index));
         }
 
-        static void push(lua_State * _luaState, const stick::Float32 & _number)
+        static stick::Int32 push(lua_State * _luaState, const stick::Float32 & _number)
         {
             lua_pushnumber(_luaState, _number);
+            return 1;
         }
     };
 
@@ -399,9 +407,10 @@ namespace luanatic
             return static_cast<stick::Float64>(luaL_checknumber(_luaState, _index));
         }
 
-        static void push(lua_State * _luaState, const stick::Float64 & _number)
+        static stick::Int32 push(lua_State * _luaState, const stick::Float64 & _number)
         {
             lua_pushnumber(_luaState, _number);
+            return 1;
         }
     };
 
@@ -414,9 +423,10 @@ namespace luanatic
             return stick::String(luaL_checkstring(_luaState, _index));
         }
 
-        static void push(lua_State * _luaState, const stick::String & _str)
+        static stick::Int32 push(lua_State * _luaState, const stick::String & _str)
         {
             lua_pushstring(_luaState, _str.cString());
+            return 1;
         }
     };
 
@@ -428,9 +438,10 @@ namespace luanatic
             return static_cast<T>(luaL_checkinteger(_luaState, _index));
         }
 
-        static void push(lua_State * _luaState, const T & _value)
+        static stick::Int32 push(lua_State * _luaState, const T & _value)
         {
             lua_pushinteger(_luaState, static_cast<stick::Int32>(_value));
+            return 1;
         }
     };
 
@@ -466,7 +477,7 @@ namespace luanatic
             return ret;
         }
 
-        static void push(lua_State * _luaState, const stick::DynamicArray<T> & _array)
+        static stick::Int32 push(lua_State * _luaState, const stick::DynamicArray<T> & _array)
         {
             lua_newtable(_luaState);
             auto it = _array.begin();
@@ -477,6 +488,7 @@ namespace luanatic
                 pushValueType<T>(_luaState, *it);
                 lua_settable(_luaState, -3);
             }
+            return 1;
         }
     };
 
@@ -523,7 +535,7 @@ namespace luanatic
                 return stick::Error();
         }
 
-        static void push(lua_State * _state, const stick::Error & _error)
+        static stick::Int32 push(lua_State * _state, const stick::Error & _error)
         {
             if (!_error)
             {
@@ -545,6 +557,7 @@ namespace luanatic
                 lua_pushlightuserdata(_state, (void *)&_error.category());
                 lua_setfield(_state, -2, "category");
             }
+            return 1;
         }
     };
 
@@ -1376,24 +1389,26 @@ namespace luanatic
     namespace detail
     {
         template <class U>
-        void DefaultValueTypeConverterImpl < U, typename std::enable_if < std::is_copy_constructible<U>::value>::type >::push(lua_State * _state, const U & _value)
+        stick::Int32 DefaultValueTypeConverterImpl < U, typename std::enable_if < std::is_copy_constructible<U>::value>::type >::push(lua_State * _state, const U & _value)
         {
             //By default we try pushing this as if it was a registered type,
             //hoping that it will succeed.
             detail::LuanaticState * state = detail::luanaticState(_state);
             STICK_ASSERT(state);
             luanatic::push(_state, state->m_allocator->create<U>(_value), true);
+            return 1;
         }
     }
 
     template <class U>
-    void ValueTypeConverter <stick::UniquePtr<U>>::push(lua_State * _state, const stick::UniquePtr<U> & _value)
+    stick::Int32 ValueTypeConverter <stick::UniquePtr<U>>::push(lua_State * _state, const stick::UniquePtr<U> & _value)
     {
         detail::LuanaticState * state = detail::luanaticState(_state);
         STICK_ASSERT(state);
         //damn...this const cast feels hella sketchy let's see if we can come up with a better way to push
         //unique pointers from value. (I think this might be as good as it gets)
         luanatic::push(_state, state->m_allocator->create<stick::UniquePtr<U>>(std::move(const_cast<stick::UniquePtr<U>&>(_value))), true);
+        return 1;
     }
 
     template <class T>
@@ -1754,9 +1769,9 @@ namespace luanatic
     }
 
     template <class T>
-    inline void pushValueType(lua_State * _luaState, const T & _value)
+    inline stick::Int32 pushValueType(lua_State * _luaState, const T & _value)
     {
-        ValueTypeConverter<T>::push(_luaState, _value);
+        return ValueTypeConverter<T>::push(_luaState, _value);
     }
 
     template <class T, class...Args>
@@ -1806,9 +1821,9 @@ namespace luanatic
         struct ApplyPolicyPtr
         {
             template<class T>
-            static void apply(lua_State * _luaState, T * _val, const P & _policy)
+            static stick::Int32 apply(lua_State * _luaState, T * _val, const P & _policy)
             {
-                _policy.template push<typename RawType<T>::Type>(_luaState, _val);
+                return _policy.template push<typename RawType<T>::Type>(_luaState, _val);
             }
         };
 
@@ -1816,12 +1831,13 @@ namespace luanatic
         struct ApplyPolicyPtr<NoPolicy>
         {
             template<class T>
-            static void apply(lua_State * _luaState, T * _val, const NoPolicy & _p)
+            static stick::Int32 apply(lua_State * _luaState, T * _val, const NoPolicy & _p)
             {
                 if (!_val)
                     lua_pushnil(_luaState);
                 else
                     luanatic::push<typename RawType<T>::Type>(_luaState, _val, false);
+                return 1;
             }
         };
 
@@ -1830,9 +1846,9 @@ namespace luanatic
         struct ApplyPolicyValueType
         {
             template<class T>
-            static void apply(lua_State * _luaState, const T & _val, const P & _policy)
+            static stick::Int32 apply(lua_State * _luaState, const T & _val, const P & _policy)
             {
-                _policy.template push<typename RawType<T>::Type>(_luaState, _val);
+                return _policy.template push<typename RawType<T>::Type>(_luaState, _val);
             }
         };
 
@@ -1840,9 +1856,9 @@ namespace luanatic
         struct ApplyPolicyValueType<NoPolicy>
         {
             template<class T>
-            static void apply(lua_State * _luaState, const T & _val, const NoPolicy & _p)
+            static stick::Int32 apply(lua_State * _luaState, const T & _val, const NoPolicy & _p)
             {
-                luanatic::pushValueType<typename RawType<T>::Type>(_luaState, _val);
+                return luanatic::pushValueType<typename RawType<T>::Type>(_luaState, _val);
             }
         };
 
@@ -1854,12 +1870,13 @@ namespace luanatic
         struct Pusher<void *>
         {
             template<class Policy>
-            static void push(lua_State * _luaState, void * _val, const Policy & _policy = Policy())
+            static stick::Int32 push(lua_State * _luaState, void * _val, const Policy & _policy = Policy())
             {
                 if (!_val)
                     lua_pushnil(_luaState);
                 else
                     lua_pushlightuserdata(_luaState, _val);
+                return 1;
             }
         };
 
@@ -1869,12 +1886,13 @@ namespace luanatic
         struct Pusher<const char *>
         {
             template<class Policy>
-            static void push(lua_State * _luaState, const char * _val, const Policy & _policy = Policy())
+            static stick::Int32 push(lua_State * _luaState, const char * _val, const Policy & _policy = Policy())
             {
                 if (!_val)
                     lua_pushnil(_luaState);
                 else
                     lua_pushstring(_luaState, _val);
+                return 1;
             }
         };
 
@@ -1882,9 +1900,9 @@ namespace luanatic
         struct Pusher<T *>
         {
             template<class Policy>
-            static void push(lua_State * _luaState, T * _val, const Policy & _policy = Policy())
+            static stick::Int32 push(lua_State * _luaState, T * _val, const Policy & _policy = Policy())
             {
-                ApplyPolicyPtr<Policy>::apply(_luaState, _val, _policy);
+                return ApplyPolicyPtr<Policy>::apply(_luaState, _val, _policy);
             }
         };
 
@@ -1903,9 +1921,10 @@ namespace luanatic
         struct Pusher<T &>
         {
             template<class Policy>
-            static void push(lua_State * _luaState, T & _val, const Policy & _policy = Policy())
+            static stick::Int32 push(lua_State * _luaState, T & _val, const Policy & _policy = Policy())
             {
                 luanatic::push<typename RawType<T>::Type>(_luaState, &_val, false);
+                return 1;
             }
         };
 
@@ -1913,9 +1932,9 @@ namespace luanatic
         struct Pusher<const T &>
         {
             template<class Policy>
-            static void push(lua_State * _luaState, const T & _val, const Policy & _policy = Policy())
+            static stick::Int32 push(lua_State * _luaState, const T & _val, const Policy & _policy = Policy())
             {
-                ApplyPolicyValueType<Policy>::apply(_luaState, _val, _policy);
+                return ApplyPolicyValueType<Policy>::apply(_luaState, _val, _policy);
             }
         };
 
@@ -1923,9 +1942,9 @@ namespace luanatic
         struct Pusher<T>
         {
             template<class Policy>
-            static void push(lua_State * _luaState, const T & _val, const Policy & _policy = Policy())
+            static stick::Int32 push(lua_State * _luaState, const T & _val, const Policy & _policy = Policy())
             {
-                ApplyPolicyValueType<Policy>::apply(_luaState, _val, _policy);
+                return ApplyPolicyValueType<Policy>::apply(_luaState, _val, _policy);
             }
         };
 
@@ -1934,9 +1953,10 @@ namespace luanatic
         struct Pusher<const char (&) [N]>
         {
             template<class Policy>
-            static void push(lua_State * _luaState, const char (&_val)[N], const Policy & _policy = Policy())
+            static stick::Int32 push(lua_State * _luaState, const char (&_val)[N], const Policy & _policy = Policy())
         {
             lua_pushstring(_luaState, _val);
+            return 1;
         }
                     };
 
@@ -1944,9 +1964,9 @@ namespace luanatic
         struct PickPusher
         {
             template<class Policy>
-            static void push(lua_State * _state, T && _value, const Policy & _policy)
+            static stick::Int32 push(lua_State * _state, T && _value, const Policy & _policy)
             {
-                Pusher<T>::push(_state, std::forward<T>(_value), _policy);
+                return Pusher<T>::push(_state, std::forward<T>(_value), _policy);
             }
         };
 
@@ -1955,9 +1975,9 @@ namespace luanatic
         struct PickPusher<T &>
         {
             template<class Policy>
-            static void push(lua_State * _state, const T & _value, const Policy & _policy)
+            static stick::Int32 push(lua_State * _state, const T & _value, const Policy & _policy)
             {
-                Pusher<const T &>::push(_state, std::forward<const T &>(_value), _policy);
+                return Pusher<const T &>::push(_state, std::forward<const T &>(_value), _policy);
             }
         };
 
@@ -1966,9 +1986,9 @@ namespace luanatic
         struct PickPusher<const std::reference_wrapper<T> &>
         {
             template<class Policy>
-            static void push(lua_State * _state, const std::reference_wrapper<T> & _value, const Policy & _policy)
+            static stick::Int32 push(lua_State * _state, const std::reference_wrapper<T> & _value, const Policy & _policy)
             {
-                Pusher<T &>::push(_state, std::forward<T &>(_value.get()), _policy);
+                return Pusher<T &>::push(_state, std::forward<T &>(_value.get()), _policy);
             }
         };
 
@@ -1976,9 +1996,9 @@ namespace luanatic
         struct PickPusher<T *& >
         {
             template<class Policy>
-            static void push(lua_State * _state, T * _value, const Policy & _policy)
+            static stick::Int32 push(lua_State * _state, T * _value, const Policy & _policy)
             {
-                Pusher<T *>::push(_state, std::forward<T *>(_value), _policy);
+                return Pusher<T *>::push(_state, std::forward<T *>(_value), _policy);
             }
         };
     }
@@ -1989,9 +2009,10 @@ namespace luanatic
         using Target = F;
 
         template<class T>
-        void push(lua_State * _luaState, T * _val) const
+        stick::Int32 push(lua_State * _luaState, T * _val) const
         {
             luanatic::push<T>(_luaState, _val, true);
+            return 1;
         }
     };
 
@@ -2447,9 +2468,7 @@ namespace luanatic
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), 0);
             using Policy = typename GetPolicy<ph::Result, NoPolicy, Policies...>::Policy;
-            //returnPolicy.template push<Ret>(_luaState, (*Func)(convert<Args>(_luaState, 1 + N)...));
-            Pusher<Ret>::push(_luaState, (*Func)(convert<Args>(_luaState, 1 + N)...), Policy());
-            return 1;
+            return Pusher<Ret>::push(_luaState, (*Func)(convert<Args>(_luaState, 1 + N)...), Policy());
         }
                 };
 
@@ -2522,11 +2541,8 @@ namespace luanatic
         {
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), -1); // - 1 for self
             C * obj = convertToTypeAndCheck<typename RawType<C>::Type>(_luaState, 1);
-            //typename GetPolicy<ph::Result, Keep<ph::Result>, Policies...>::Policy returnPolicy;
             using Policy = typename GetPolicy<ph::Result, NoPolicy, Policies...>::Policy;
-            Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...), Policy());
-            //returnPolicy.template push<Ret>(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...));
-            return 1;
+            return Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...), Policy());
         }
                 };
 
@@ -2564,10 +2580,7 @@ namespace luanatic
             checkArgumentCountAndEmitLuaError(_luaState, sizeof...(Args), -1); // - 1 for self
             C * obj = convertToTypeAndCheck<typename RawType<C>::Type>(_luaState, 1);
             using Policy = typename GetPolicy<ph::Result, NoPolicy, Policies...>::Policy;
-            //typename GetPolicy<ph::Result, Keep<ph::Result>, Policies...>::Policy returnPolicy;
-            Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...), Policy());
-            //returnPolicy.template push<Ret>(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...));
-            return 1;
+            return Pusher<Ret>::push(_luaState, (obj->*Func)(convert<Args>(_luaState, 2 + N)...), Policy());
         }
                 };
 
@@ -2831,11 +2844,12 @@ namespace luanatic
         };
 
         template<bool ForceReference, class Iterator>
-        inline void pushRange(lua_State * _luaState, Iterator _begin, Iterator _end)
+        inline stick::Int32 pushRange(lua_State * _luaState, Iterator _begin, Iterator _end)
         {
             pushUnregisteredType<Iterator>(_luaState, _begin);
             pushUnregisteredType<Iterator>(_luaState, _end);
             RangeFunctionPusher<Iterator, ForceReference>::push(_luaState);
+            return 3;
         }
 
         template<class T>
@@ -2884,9 +2898,9 @@ namespace luanatic
         using Target = G;
 
         template<class T>
-        void push(lua_State * _luaState, const T & _container) const
+        stick::Int32 push(lua_State * _luaState, const T & _container) const
         {
-            detail::pushRange<false>(_luaState, _container.begin(), _container.end());
+            return detail::pushRange<false>(_luaState, _container.begin(), _container.end());
         }
     };
 
@@ -2896,9 +2910,9 @@ namespace luanatic
         using Target = G;
 
         template<class T>
-        void push(lua_State * _luaState, const T & _container) const
+        stick::Int32 push(lua_State * _luaState, const T & _container) const
         {
-            detail::pushRange<true>(_luaState, _container.begin(), _container.end());
+            return detail::pushRange<true>(_luaState, _container.begin(), _container.end());
         }
     };
 
@@ -3883,12 +3897,35 @@ namespace luanatic
             return detail::Converter<T>::convert(_state, _index);
         }
 
-        static void push(lua_State * _state, stick::Maybe<T> _value)
+        static stick::Int32 push(lua_State * _state, stick::Maybe<T> _value)
         {
             if (!_value)
                 lua_pushnil(_state);
             else
-                detail::Pusher<T>::push(_state, *_value, detail::NoPolicy());
+                return detail::Pusher<T>::push(_state, *_value, detail::NoPolicy());
+        }
+    };
+
+    template <class T>
+    struct ValueTypeConverter<stick::Result<T> >
+    {
+        static T convertAndCheck(lua_State * _state, stick::Int32 _index)
+        {
+            return detail::Converter<T>::convert(_state, _index);
+        }
+
+        static stick::Int32 push(lua_State * _state, const stick::Result<T> & _value)
+        {
+            if (!_value)
+            {
+                lua_pushnil(_state);
+                lua_pushstring(_state, _value.error().message().cString());
+                return 2;
+            }
+            else
+            {
+                return detail::Pusher<T>::push(_state, _value.get(), detail::NoPolicy());
+            }
         }
     };
 }
