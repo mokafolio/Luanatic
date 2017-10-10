@@ -2849,7 +2849,7 @@ namespace luanatic
             pushUnregisteredType<Iterator>(_luaState, _begin);
             pushUnregisteredType<Iterator>(_luaState, _end);
             RangeFunctionPusher<Iterator, ForceReference>::push(_luaState);
-            return 3;
+            return 1;
         }
 
         template<class T>
