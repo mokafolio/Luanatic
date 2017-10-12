@@ -9,6 +9,7 @@
 #include <Stick/UniquePtr.hpp>
 #include <Stick/Maybe.hpp>
 #include <Stick/Result.hpp>
+#include <Stick/URI.hpp>
 
 #include <type_traits>
 #include <functional> //for std::ref
@@ -3926,6 +3927,20 @@ namespace luanatic
             {
                 return detail::Pusher<T>::push(_state, _value.get(), detail::NoPolicy());
             }
+        }
+    };
+
+    template<>
+    struct ValueTypeConverter<stick::URI>
+    {
+        static stick::URI convertAndCheck(lua_State * _state, stick::Int32 _index)
+        {
+            return stick::URI(luaL_checkstring(_state, _index));
+        }
+
+        static stick::Int32 push(lua_State * _state, const stick::URI & _value)
+        {
+            return detail::DefaultValueTypeConverterImpl<stick::URI>::push(_state, _value);
         }
     };
 }
