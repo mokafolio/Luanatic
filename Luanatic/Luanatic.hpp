@@ -3619,13 +3619,13 @@ namespace luanatic
             lua_newtable(_state);                       //classTable ... objInstance
             lua_pushvalue(_state, 1);                   //classTable ... objInstance classTable
             lua_setmetatable(_state, -2);               //classTable ... objInstance
-            lua_insert(_state, 2);                      //classTable objInstance ...
-            lua_getfield(_state, 1, "__init");          //classTable objInstance ... initOrNil
-            lua_replace(_state, 1);                     //initOrNil objInstance ...
+            lua_getfield(_state, 1, "__init");          //classTable ... objInstance initOrNil
             if (!lua_isnil(_state, -1))
             {
                 //call the __init function
                 //@TODO: this looks like there is a lot of room for optimization :)
+                lua_replace(_state, 1);                     //init ... objInstance
+                lua_insert(_state, 2);                      //init objInstance ...
                 lua_pushvalue(_state, 2); //init objInstance ... objInstance
                 lua_insert(_state, 1); //objInstance init objInstance ...
                 lua_call(_state, argCount, 0); // objInstance
