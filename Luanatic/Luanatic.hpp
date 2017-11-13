@@ -15,6 +15,7 @@
 #include <functional> //for std::ref
 #include <tuple>
 #include <cstdint>
+#include <cstring>
 
 #include <cxxabi.h>
 
@@ -275,6 +276,12 @@ namespace luanatic
 
     template <class U, class Enable = void>
     struct ValueTypeConverter
+    {
+        static constexpr bool __defaultConverterImpl = true;
+    };
+
+    template <class U>
+    struct ValueTypeConverter<U, typename std::enable_if < std::is_copy_constructible<U>::value>::type>
     {
         static constexpr bool __defaultConverterImpl = true;
 
