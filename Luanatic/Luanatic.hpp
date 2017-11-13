@@ -234,14 +234,6 @@ namespace luanatic
         detail::DefaultArgsBase * defaultArgs;
     };
 
-    template <class T, std::size_t = sizeof(T)>
-    std::true_type IsCompleteImpl(T *);
-
-    std::false_type IsCompleteImpl(...);
-
-    template <class T>
-    using IsComplete = decltype(IsCompleteImpl(std::declval<T *>()));
-
     namespace detail
     {
         template<class U, class Enable = void>
@@ -290,46 +282,12 @@ namespace luanatic
             return detail::DefaultValueTypeConverterImpl<U>::push(_state, _value);
         }
     };
-    // template <class U, class Enable = void>
-    // struct ValueTypeConverter
-    // {
-    //     static constexpr bool __defaultConverterImpl = true;
-
-    //     static U convertAndCheck(lua_State * _state, stick::Int32 _index)
-    //     {
-    //         detail::luaErrorWithStackTrace(_state, _index, "No ValueTypeConverter implementation found.");
-    //         return U();
-    //     }
-
-    //     static stick::Int32 push(lua_State * _state, const U & _value)
-    //     {
-    //         luaL_error(_state, "No ValueTypeConverter implementation found to push.");
-    //         return 1;
-    //     }
-    // };
 
     template <class U, class Enable = void>
     struct ValueTypeConverter
     {
         static constexpr bool __defaultConverterImpl = true;
     };
-
-    // template <class U, class Enable = void>
-    // struct ValueTypeConverter
-    // {
-    //     static constexpr bool __defaultConverterImpl = true;
-
-    //     static U convertAndCheck(lua_State * _state, stick::Int32 _index)
-    //     {
-    //         return detail::DefaultValueTypeConverterImpl<U>::convertAndCheck(_state, _index);
-    //     }
-
-    //     //implemented further down, as we need detail::LuanaticState for memory allocation
-    //     static stick::Int32 push(lua_State * _state, const U & _value)
-    //     {
-    //         return detail::DefaultValueTypeConverterImpl<U>::push(_state, _value);
-    //     }
-    // };
 
     template <class U>
     struct ValueTypeConverter<stick::UniquePtr<U>>
@@ -603,14 +561,6 @@ namespace luanatic
         }
     };
 
-    template <class T, std::size_t = sizeof(T)>
-    std::true_type is_complete_impl(T *);
-
-    std::false_type is_complete_impl(...);
-
-    template <class T>
-    using is_complete = decltype(is_complete_impl(std::declval<T *>()));
-
     template<class T>
     class HasValueTypeConverter
     {
@@ -624,12 +574,6 @@ namespace luanatic
 
         static constexpr bool value = decltype(check<T>(0))::value;
     };
-
-    // template<class T>
-    // struct HasValueTypeConverter
-    // {
-    //     static constexpr bool value = is_complete<T>::value;
-    // };
 
     /*template<class T>
     struct ValueTypeConverter < T, typename std::enable_if < std::is_copy_constructible<T>::value &&
