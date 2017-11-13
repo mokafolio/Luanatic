@@ -275,13 +275,7 @@ namespace luanatic
     }
 
     template <class U, class Enable = void>
-    struct ValueTypeConverter
-    {
-        static constexpr bool __defaultConverterImpl = true;
-    };
-
-    template <class U>
-    struct ValueTypeConverter<U, typename std::enable_if < std::is_copy_constructible<U>::value>::type>
+    struct DefaultValueTypeConverter
     {
         static constexpr bool __defaultConverterImpl = true;
 
@@ -296,6 +290,46 @@ namespace luanatic
             return detail::DefaultValueTypeConverterImpl<U>::push(_state, _value);
         }
     };
+    // template <class U, class Enable = void>
+    // struct ValueTypeConverter
+    // {
+    //     static constexpr bool __defaultConverterImpl = true;
+
+    //     static U convertAndCheck(lua_State * _state, stick::Int32 _index)
+    //     {
+    //         detail::luaErrorWithStackTrace(_state, _index, "No ValueTypeConverter implementation found.");
+    //         return U();
+    //     }
+
+    //     static stick::Int32 push(lua_State * _state, const U & _value)
+    //     {
+    //         luaL_error(_state, "No ValueTypeConverter implementation found to push.");
+    //         return 1;
+    //     }
+    // };
+
+    template <class U, class Enable = void>
+    struct ValueTypeConverter
+    {
+        static constexpr bool __defaultConverterImpl = true;
+    };
+
+    // template <class U, class Enable = void>
+    // struct ValueTypeConverter
+    // {
+    //     static constexpr bool __defaultConverterImpl = true;
+
+    //     static U convertAndCheck(lua_State * _state, stick::Int32 _index)
+    //     {
+    //         return detail::DefaultValueTypeConverterImpl<U>::convertAndCheck(_state, _index);
+    //     }
+
+    //     //implemented further down, as we need detail::LuanaticState for memory allocation
+    //     static stick::Int32 push(lua_State * _state, const U & _value)
+    //     {
+    //         return detail::DefaultValueTypeConverterImpl<U>::push(_state, _value);
+    //     }
+    // };
 
     template <class U>
     struct ValueTypeConverter<stick::UniquePtr<U>>
@@ -569,6 +603,14 @@ namespace luanatic
         }
     };
 
+    template <class T, std::size_t = sizeof(T)>
+    std::true_type is_complete_impl(T *);
+
+    std::false_type is_complete_impl(...);
+
+    template <class T>
+    using is_complete = decltype(is_complete_impl(std::declval<T *>()));
+
     template<class T>
     class HasValueTypeConverter
     {
@@ -582,6 +624,12 @@ namespace luanatic
 
         static constexpr bool value = decltype(check<T>(0))::value;
     };
+
+    // template<class T>
+    // struct HasValueTypeConverter
+    // {
+    //     static constexpr bool value = is_complete<T>::value;
+    // };
 
     /*template<class T>
     struct ValueTypeConverter < T, typename std::enable_if < std::is_copy_constructible<T>::value &&
@@ -1649,6 +1697,15 @@ namespace luanatic
         return ret;
     }
 
+    namespace detail
+    {
+        template<class T>
+        struct PickValueTypeConverter
+        {
+            using Converter = typename std::conditional<HasValueTypeConverter<T>::value, ValueTypeConverter<T>, DefaultValueTypeConverter<T>>::type;
+        };
+    }
+
     template <class T>
     inline T convertToValueTypeAndCheck(lua_State * _luaState, stick::Int32 _index)
     {
@@ -1661,7 +1718,7 @@ namespace luanatic
         }
 
         // check if there is a value converted implemented
-        return ValueTypeConverter<T>::convertAndCheck(_luaState, _index);
+        return detail::PickValueTypeConverter<T>::Converter::convertAndCheck(_luaState, _index);
     }
 
     template <class T, class WT>
@@ -1698,6 +1755,7 @@ namespace luanatic
                     if (it == glua->m_typeIDClassMap.end())
                     {
                         luaL_error(_luaState, "Can't push unregistered type to Lua!");
+                        return false;
                     }
 
                     lua_rawgeti(_luaState, LUA_REGISTRYINDEX, (*it).value.namespaceIndex);
@@ -1779,7 +1837,7 @@ namespace luanatic
     template <class T>
     inline stick::Int32 pushValueType(lua_State * _luaState, const T & _value)
     {
-        return ValueTypeConverter<T>::push(_luaState, _value);
+        return detail::PickValueTypeConverter<T>::Converter::push(_luaState, _value);
     }
 
     template <class T, class...Args>
@@ -2207,7 +2265,6 @@ namespace luanatic
                     //the tmp memory we need for this.
                     LuanaticState * ls = luanaticState(_luaState);
                     STICK_ASSERT(ls);
-                    // auto ptr = ls->m_allocator->create<T>(convertToValueTypeAndCheck<typename RawType<T>::Type>(_luaState, _index));
                     return ReturnProxy(ConverterHelper<T>::convert(_luaState, _index, ls), ls->m_allocator);
                 }
             }
