@@ -10,6 +10,7 @@
 #include <Stick/Maybe.hpp>
 #include <Stick/Result.hpp>
 #include <Stick/URI.hpp>
+#include <Stick/Variant.hpp>
 
 #include <type_traits>
 #include <functional> //for std::ref
@@ -3901,8 +3902,10 @@ namespace luanatic
     template <class T>
     struct ValueTypeConverter<stick::Maybe<T> >
     {
-        static T convertAndCheck(lua_State * _state, stick::Int32 _index)
+        static stick::Maybe<T> convertAndCheck(lua_State * _state, stick::Int32 _index)
         {
+            if(lua_isnil(_state, _index))
+                return stick::Maybe<T>();
             return detail::Converter<T>::convert(_state, _index);
         }
 
@@ -3912,8 +3915,26 @@ namespace luanatic
                 lua_pushnil(_state);
             else
                 return detail::Pusher<T>::push(_state, *_value, detail::NoPolicy());
+            return 1;
         }
     };
+
+    // template <class...Args>
+    // struct ValueTypeConverter<stick::Variant<Args...> >
+    // {
+    //     static T convertAndCheck(lua_State * _state, stick::Int32 _index)
+    //     {
+    //         return detail::Converter<T>::convert(_state, _index);
+    //     }
+
+    //     static stick::Int32 push(lua_State * _state, stick::Maybe<T> _value)
+    //     {
+    //         if (!_value)
+    //             lua_pushnil(_state);
+    //         else
+    //             return detail::Pusher<T>::push(_state, *_value, detail::NoPolicy());
+    //     }
+    // };
 
     template <class T>
     struct ValueTypeConverter<stick::Result<T> >

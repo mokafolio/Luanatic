@@ -1048,6 +1048,33 @@ const Suite spec[] =
         }
         EXPECT(lua_gettop(state) == 0);
         lua_close(state);
+    },
+    SUITE("Maybe Tests")
+    {
+        lua_State * state = luanatic::createLuaState();
+        {
+            luanatic::openStandardLibraries(state);
+            luanatic::initialize(state);
+            luanatic::LuaValue globals = luanatic::globalsTable(state);
+
+            globals["maybe"].set(Maybe<Int32>(99));
+            //@TODO: Write a better test...
+            String luaCode = "assert(maybe == 99)\n";
+
+            auto err = luanatic::execute(state, luaCode);
+            EXPECT(!err);
+            if (err)
+                printf("%s\n", err.message().cString());
+
+            auto m = globals["maybe"].get<Maybe<Int32>>();
+            EXPECT(m);
+            EXPECT(*m == 99);
+
+            auto m2 = globals["nonexistent"].get<Maybe<Int32>>();
+            EXPECT(!m2);
+        }
+        EXPECT(lua_gettop(state) == 0);
+        lua_close(state);
     }
 };
 
