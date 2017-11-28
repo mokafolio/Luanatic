@@ -1058,7 +1058,6 @@ const Suite spec[] =
             luanatic::LuaValue globals = luanatic::globalsTable(state);
 
             globals["maybe"].set(Maybe<Int32>(99));
-            //@TODO: Write a better test...
             String luaCode = "assert(maybe == 99)\n";
 
             auto err = luanatic::execute(state, luaCode);
@@ -1072,6 +1071,32 @@ const Suite spec[] =
 
             auto m2 = globals["nonexistent"].get<Maybe<Int32>>();
             EXPECT(!m2);
+        }
+        EXPECT(lua_gettop(state) == 0);
+        lua_close(state);
+    },
+    SUITE("Variant Tests")
+    {
+        lua_State * state = luanatic::createLuaState();
+        {
+            luanatic::openStandardLibraries(state);
+            luanatic::initialize(state);
+            luanatic::LuaValue globals = luanatic::globalsTable(state);
+
+            String luaCode = "test = 'blubb'\n";
+
+            auto err = luanatic::execute(state, luaCode);
+            EXPECT(!err);
+            if (err)
+                printf("%s\n", err.message().cString());
+
+            auto v = globals["test"].get<Variant<Int32, String>>();
+            EXPECT(v.isValid());
+            EXPECT(v.is<String>());
+            EXPECT(v.get<String>() == "blubb");
+
+            auto v2 = globals["nonexistent"].get<Variant<Int32, String>>();
+            EXPECT(!v2.isValid());
         }
         EXPECT(lua_gettop(state) == 0);
         lua_close(state);

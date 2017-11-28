@@ -6,6 +6,7 @@
 #include <Stick/HashMap.hpp>
 #include <Stick/StringConversion.hpp>
 #include <Stick/TypeInfo.hpp>
+#include <Stick/TypeList.hpp>
 #include <Stick/UniquePtr.hpp>
 #include <Stick/Maybe.hpp>
 #include <Stick/Result.hpp>
@@ -3909,7 +3910,7 @@ namespace luanatic
             return detail::Converter<T>::convert(_state, _index);
         }
 
-        static stick::Int32 push(lua_State * _state, stick::Maybe<T> _value)
+        static stick::Int32 push(lua_State * _state, const stick::Maybe<T> & _value)
         {
             if (!_value)
                 lua_pushnil(_state);
@@ -3919,22 +3920,54 @@ namespace luanatic
         }
     };
 
-    // template <class...Args>
-    // struct ValueTypeConverter<stick::Variant<Args...> >
-    // {
-    //     static T convertAndCheck(lua_State * _state, stick::Int32 _index)
-    //     {
-    //         return detail::Converter<T>::convert(_state, _index);
-    //     }
+    namespace detail
+    {
+        template<class L, class...Args>
+        struct VariantConverterHelper
+        {
+            static stick::Variant<Args...> convert(lua_State * _state, stick::Int32 _index)
+            {
+                if(conversionScore<typename L::Head>(_state, _index) == 0)
+                    return convertToValueTypeAndCheck<typename L::Head>(_state, _index);
+                return VariantConverterHelper<typename L::Tail, Args...>::convert(_state, _index);
+            }
+        };
 
-    //     static stick::Int32 push(lua_State * _state, stick::Maybe<T> _value)
-    //     {
-    //         if (!_value)
-    //             lua_pushnil(_state);
-    //         else
-    //             return detail::Pusher<T>::push(_state, *_value, detail::NoPolicy());
-    //     }
-    // };
+        template<class...Args>
+        struct VariantConverterHelper<stick::TypeListNil, Args...>
+        {
+            static stick::Variant<Args...> convert(lua_State * _state, stick::Int32 _index)
+            {
+                return stick::Variant<Args...>();
+            }
+        };
+
+        template<class...Args>
+        struct VariantConverter
+        {
+            static stick::Variant<Args...> convert(lua_State * _state, stick::Int32 _index)
+            {
+                return VariantConverterHelper<typename stick::MakeTypeList<Args...>::List, Args...>::convert(_state, _index);
+            }
+        };
+    }
+
+    template <class...Args>
+    struct ValueTypeConverter<stick::Variant<Args...> >
+    {
+        static stick::Variant<Args...> convertAndCheck(lua_State * _state, stick::Int32 _index)
+        {
+            if(lua_isnil(_state, _index))
+                return stick::Variant<Args...>();
+
+            return detail::VariantConverter<Args...>::convert(_state, _index);
+        }
+
+        static stick::Int32 push(lua_State * _state, const stick::Variant<Args...> & _value)
+        {
+
+        }
+    };
 
     template <class T>
     struct ValueTypeConverter<stick::Result<T> >
