@@ -1578,14 +1578,15 @@ namespace luanatic
         }
         else if (isOfType<RT>(_luaState, _index, true))
         {
-            return 0;
+            // return 0;
+            return std::is_pointer<T>::value ? 0 : 1;
         }
         else
         {
             detail::UserData * pud = static_cast<detail::UserData *>(lua_touserdata(_luaState, _index));
             detail::LuanaticState * glua = detail::luanaticState(_luaState);
             STICK_ASSERT(glua != nullptr);
-            auto cc = detail::findCastFunctionImpl(*glua, *pud, stick::TypeInfoT<RT>::typeID(), 1).castCount;
+            auto cc = detail::findCastFunctionImpl(*glua, *pud, stick::TypeInfoT<RT>::typeID(), 2).castCount;
             if (cc != -1)
                 return cc;
             else return std::numeric_limits<stick::Int32>::max();

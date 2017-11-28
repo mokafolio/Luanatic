@@ -870,11 +870,11 @@ const Suite spec[] =
             luanatic::LuaValue t = globals["test"];
             t.push();
             EXPECT(lua_isuserdata(state, -1));
-            EXPECT(luanatic::conversionScore<A>(state, -1) == 2);
+            EXPECT(luanatic::conversionScore<A>(state, -1) == 3);
             printf("DA SCORE %i\n", luanatic::conversionScore<B>(state, -1));
             EXPECT(luanatic::conversionScore<const B *>(state, -1) == std::numeric_limits<stick::Int32>::max());
-            EXPECT(luanatic::conversionScore<CoolClass &>(state, -1) == 1);
-            EXPECT(luanatic::conversionScore<const E>(state, -1) == 0);
+            EXPECT(luanatic::conversionScore<CoolClass &>(state, -1) == 2);
+            EXPECT(luanatic::conversionScore<const E>(state, -1) == 1);
 
             //test conversion scoring for basic types
             lua_pushinteger(state, 3);
@@ -1124,10 +1124,10 @@ const Suite spec[] =
             //not sure if there is a meaningful destinguishment from the Lua side of things.
             //one way might be to make the conversion score distinguish between having to make
             //a copy or not.
-            auto v3 = globals["testInstance"].get<Variant<Int32, String, TestClass*>>();
+            auto v3 = globals["testInstance"].get<Variant<Int32, TestClass&, TestClass>>();
             EXPECT(v3.isValid());
-            EXPECT(v3.is<TestClass*>());
-            EXPECT(v3.get<TestClass*>() == &tc);
+            EXPECT(v3.is<TestClass&>());
+            EXPECT(&v3.get<TestClass&>() == &tc);
         }
         EXPECT(lua_gettop(state) == 0);
         lua_close(state);
