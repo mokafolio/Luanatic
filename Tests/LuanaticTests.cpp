@@ -1083,20 +1083,51 @@ const Suite spec[] =
             luanatic::initialize(state);
             luanatic::LuaValue globals = luanatic::globalsTable(state);
 
-            String luaCode = "test = 'blubb'\n";
+            luanatic::ClassWrapper<TestClass> tw("TestClass");
+            tw.
+            addConstructor<Int32>("new").
+            addMemberFunction("add", LUANATIC_FUNCTION(&TestClass::add)).
+            addMemberFunction("addViaPointer", LUANATIC_FUNCTION(&TestClass::addViaPointer)).
+            addMemberFunction("get", LUANATIC_FUNCTION(&TestClass::get)).
+            addAttribute("val", LUANATIC_ATTRIBUTE(&TestClass::val)).
+            addAttribute("other", LUANATIC_ATTRIBUTE(&TestClass::other)).
+            addStaticFunction("staticFunction", LUANATIC_FUNCTION(&TestClass::staticFunction));
+
+            globals.registerClass(tw);
+
+
+            TestClass tc(99);
+            globals["testInstance"].set(&tc);
+
+            //see if we can push a variant
+            globals["testVariant"].set(Variant<String, TestClass*, Int32>("Hello!!!"));
+            globals["testVariantTwo"].set(Variant<String, TestClass*, Int32>(&tc));
+
+            String luaCode = "test = 'blubb'\n"
+                             "assert(testInstance.val == testVariantTwo.val)\n"
+                             "assert(testVariant == 'Hello!!!', 'Wrong Variant String')\n";
 
             auto err = luanatic::execute(state, luaCode);
             EXPECT(!err);
             if (err)
                 printf("%s\n", err.message().cString());
 
-            auto v = globals["test"].get<Variant<Int32, String>>();
+            auto v = globals["test"].get<Variant<Int32, String, Float64>>();
             EXPECT(v.isValid());
             EXPECT(v.is<String>());
             EXPECT(v.get<String>() == "blubb");
 
             auto v2 = globals["nonexistent"].get<Variant<Int32, String>>();
             EXPECT(!v2.isValid());
+
+            //@TODO: Right now Variant<Int32, TestClass, TestClass*> will resolve to TestClass.
+            //not sure if there is a meaningful destinguishment from the Lua side of things.
+            //one way might be to make the conversion score distinguish between having to make
+            //a copy or not.
+            auto v3 = globals["testInstance"].get<Variant<Int32, String, TestClass*>>();
+            EXPECT(v3.isValid());
+            EXPECT(v3.is<TestClass*>());
+            EXPECT(v3.get<TestClass*>() == &tc);
         }
         EXPECT(lua_gettop(state) == 0);
         lua_close(state);

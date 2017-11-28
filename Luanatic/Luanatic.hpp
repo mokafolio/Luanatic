@@ -12,6 +12,7 @@
 #include <Stick/Result.hpp>
 #include <Stick/URI.hpp>
 #include <Stick/Variant.hpp>
+#include <Stick/Private/IndexSequence.hpp>
 
 #include <type_traits>
 #include <functional> //for std::ref
@@ -1975,10 +1976,10 @@ namespace luanatic
         template<class T>
         struct PickPusher
         {
-            template<class Policy>
-            static stick::Int32 push(lua_State * _state, T && _value, const Policy & _policy)
+            template<class T2, class Policy>
+            static stick::Int32 push(lua_State * _state, T2 && _value, const Policy & _policy)
             {
-                return Pusher<T>::push(_state, std::forward<T>(_value), _policy);
+                return Pusher<T>::push(_state, std::forward<T2>(_value), _policy);
             }
         };
 
@@ -3905,7 +3906,7 @@ namespace luanatic
     {
         static stick::Maybe<T> convertAndCheck(lua_State * _state, stick::Int32 _index)
         {
-            if(lua_isnil(_state, _index))
+            if (lua_isnil(_state, _index))
                 return stick::Maybe<T>();
             return detail::Converter<T>::convert(_state, _index);
         }
@@ -3922,32 +3923,109 @@ namespace luanatic
 
     namespace detail
     {
-        template<class L, class...Args>
-        struct VariantConverterHelper
-        {
-            static stick::Variant<Args...> convert(lua_State * _state, stick::Int32 _index)
-            {
-                if(conversionScore<typename L::Head>(_state, _index) == 0)
-                    return convertToValueTypeAndCheck<typename L::Head>(_state, _index);
-                return VariantConverterHelper<typename L::Tail, Args...>::convert(_state, _index);
-            }
-        };
+        // template<class L, class...Args>
+        // struct VariantConverterHelper
+        // {
+        //     static stick::Variant<Args...> convert(lua_State * _state, stick::Int32 _index)
+        //     {
+        //         // How to deal with nondirect conversions? I think
+        //         // only direct conversions should be allowed. For anythin more fance
+        //         // you need to do your own conversion.
+        //         if (conversionScore<typename L::Head>(_state, _index) == 0)
+        //             return detail::Converter<typename L::Head>::convert(_state, _index);
+        //         return VariantConverterHelper<typename L::Tail, Args...>::convert(_state, _index);
+        //     }
+        // };
 
-        template<class...Args>
-        struct VariantConverterHelper<stick::TypeListNil, Args...>
-        {
-            static stick::Variant<Args...> convert(lua_State * _state, stick::Int32 _index)
-            {
-                return stick::Variant<Args...>();
-            }
-        };
+        // template<class...Args>
+        // struct VariantConverterHelper<stick::TypeListNil, Args...>
+        // {
+        //     static stick::Variant<Args...> convert(lua_State * _state, stick::Int32 _index)
+        //     {
+        //         return stick::Variant<Args...>();
+        //     }
+        // };
 
         template<class...Args>
         struct VariantConverter
         {
+            using VariantType = stick::Variant<Args...>;
+            using ConversionFunction = VariantType (*)(lua_State *, stick::Int32);
+
+            struct Score
+            {
+                stick::Int32 score;
+                stick::Size idx;
+                ConversionFunction func;
+            };
+
+            template<class L, stick::Size I>
+            static stick::Int32 scoresImpl(lua_State * _state, stick::Int32 _index, Score * _scores)
+            {
+                using Type = typename stick::TypeAt<L, I>::Type;
+                _scores[I] =
+                {
+                    conversionScore<Type>(_state, _index),
+                    I,
+                    [](lua_State * _state, stick::Int32 _index)
+                    {
+                        return VariantType(detail::Converter<Type>::convert(_state, _index));
+                    }
+                };
+
+                return 0;
+            }
+
+            template<class L, stick::Size...S>
+            static void calcScores(lua_State * _state, stick::Int32 _index, Score * _scores, stick::detail::IndexSequence<S...>)
+            {
+                stick::Int32 dummy[] = {scoresImpl<L, S>(_state, _index, _scores)...};
+            }
+
             static stick::Variant<Args...> convert(lua_State * _state, stick::Int32 _index)
             {
-                return VariantConverterHelper<typename stick::MakeTypeList<Args...>::List, Args...>::convert(_state, _index);
+                using TL = typename stick::MakeTypeList<Args...>::List;
+                Score scores[sizeof...(Args)];
+                calcScores<TL>(_state, _index, scores, stick::detail::MakeIndexSequence<TL::count>());
+
+                //@TODO: I am sure there is a smart way to avoid this sort :)
+                std::sort(std::begin(scores), std::end(scores), [](const Score & _a, const Score & _b) { return _a.score < _b.score; });
+
+                return scores[0].func(_state, _index);
+            }
+        };
+
+        template<class L, class...Args>
+        struct VariantPusherHelper
+        {
+            template<class VT>
+            static stick::Int32 push(lua_State * _state, VT && _value)
+            {
+                if (_value.template is<typename L::Head>())
+                    return detail::PickPusher<typename L::Head>::push(_state, _value.template get<typename L::Head>(), detail::NoPolicy());
+                else
+                    return VariantPusherHelper<typename L::Tail, Args...>::push(_state, std::forward<VT>(_value));
+            }
+        };
+
+        template<class...Args>
+        struct VariantPusherHelper<stick::TypeListNil, Args...>
+        {
+            template<class VT>
+            static stick::Int32 push(lua_State * _state, VT && _value)
+            {
+                lua_pushnil(_state);
+                return 1;
+            }
+        };
+
+        template<class...Args>
+        struct VariantPusher
+        {
+            template<class VT>
+            static stick::Int32 push(lua_State * _state, VT && _value)
+            {
+                return VariantPusherHelper<typename stick::MakeTypeList<Args...>::List, Args...>::push(_state, std::forward<VT>(_value));
             }
         };
     }
@@ -3957,15 +4035,16 @@ namespace luanatic
     {
         static stick::Variant<Args...> convertAndCheck(lua_State * _state, stick::Int32 _index)
         {
-            if(lua_isnil(_state, _index))
+            if (lua_isnil(_state, _index))
                 return stick::Variant<Args...>();
 
             return detail::VariantConverter<Args...>::convert(_state, _index);
         }
 
-        static stick::Int32 push(lua_State * _state, const stick::Variant<Args...> & _value)
+        template<class VT>
+        static stick::Int32 push(lua_State * _state, VT && _value)
         {
-
+            return detail::VariantPusher<Args...>::push(_state, std::forward<VT>(_value));
         }
     };
 
