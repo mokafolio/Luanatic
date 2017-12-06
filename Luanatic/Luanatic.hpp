@@ -3911,8 +3911,8 @@ namespace luanatic
                 return stick::Maybe<T>();
             return detail::Converter<T>::convert(_state, _index);
         }
-
-        static stick::Int32 push(lua_State * _state, const stick::Maybe<T> & _value)
+        
+        static stick::Int32 push(lua_State * _state, stick::Maybe<T> _value)
         {
             if (!_value)
                 lua_pushnil(_state);

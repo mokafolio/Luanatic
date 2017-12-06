@@ -292,6 +292,11 @@ static stick::Result<stick::Int32> returnInvalidResult()
     return stick::Error(stick::ec::InvalidOperation, "Something went wrong.", STICK_FILE, STICK_LINE);
 }
 
+static stick::Variant<stick::Int32, stick::String, TestClass*> returnVariant()
+{
+    return 10;
+}
+
 
 namespace luanatic
 {
@@ -1094,7 +1099,7 @@ const Suite spec[] =
             addStaticFunction("staticFunction", LUANATIC_FUNCTION(&TestClass::staticFunction));
 
             globals.registerClass(tw);
-
+            globals.registerFunction("returnVariant", LUANATIC_FUNCTION(&returnVariant));
 
             TestClass tc(99);
             globals["testInstance"].set(&tc);
@@ -1104,6 +1109,7 @@ const Suite spec[] =
             globals["testVariantTwo"].set(Variant<String, TestClass*, Int32>(&tc));
 
             String luaCode = "test = 'blubb'\n"
+                             "assert(returnVariant() == 10)\n"
                              "assert(testInstance.val == testVariantTwo.val)\n"
                              "assert(testVariant == 'Hello!!!', 'Wrong Variant String')\n";
 
