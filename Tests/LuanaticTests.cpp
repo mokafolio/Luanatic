@@ -1126,14 +1126,10 @@ const Suite spec[] =
             auto v2 = globals["nonexistent"].get<Variant<Int32, String>>();
             EXPECT(!v2.isValid());
 
-            //@TODO: Right now Variant<Int32, TestClass, TestClass*> will resolve to TestClass.
-            //not sure if there is a meaningful destinguishment from the Lua side of things.
-            //one way might be to make the conversion score distinguish between having to make
-            //a copy or not.
-            auto v3 = globals["testInstance"].get<Variant<Int32, TestClass&, TestClass>>();
+            auto v3 = globals["testInstance"].get<Variant<Int32, TestClass*>>();
             EXPECT(v3.isValid());
-            EXPECT(v3.is<TestClass&>());
-            EXPECT(&v3.get<TestClass&>() == &tc);
+            EXPECT(v3.is<TestClass*>());
+            EXPECT(v3.get<TestClass*>() == &tc);
         }
         EXPECT(lua_gettop(state) == 0);
         lua_close(state);

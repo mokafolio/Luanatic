@@ -20,7 +20,9 @@
 #include <cstdint>
 #include <cstring>
 
+#ifdef __GNUC__
 #include <cxxabi.h>
+#endif //__GNUC__
 
 extern "C" {
 #include <lauxlib.h>
@@ -2350,8 +2352,12 @@ namespace luanatic
         stick::String demangleTypeName(const char * _name)
         {
             stick::Int32 status;
+#ifdef __GNUC__
             auto ret = abi::__cxa_demangle(_name, NULL, NULL, &status);
-            return ret ? stick::String(ret) : "";
+            return ret ? stick::String(ret) : _name;
+#else
+            return _name;
+#endif
         }
 
         template<class T>
@@ -3911,7 +3917,7 @@ namespace luanatic
                 return stick::Maybe<T>();
             return detail::Converter<T>::convert(_state, _index);
         }
-        
+
         static stick::Int32 push(lua_State * _state, stick::Maybe<T> _value)
         {
             if (!_value)
