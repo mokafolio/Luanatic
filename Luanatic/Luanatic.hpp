@@ -1922,6 +1922,16 @@ namespace luanatic
             }
         };
 
+        template <class T>
+        struct Pusher<T *const>
+        {
+            template<class Policy>
+            static stick::Int32 push(lua_State * _luaState, T *const _val, const Policy & _policy = Policy())
+            {
+                return ApplyPolicyPtr<Policy>::apply(_luaState, _val, _policy);
+            }
+        };
+
         // // We need to do an overload using std::ref
         // template <class T>
         // struct Pusher<const std::reference_wrapper<T> & >
@@ -2823,7 +2833,7 @@ namespace luanatic
                 {
                     //push the current iterator value and advance
                     IterValuePusher<Iterator, ForceReference>::push(_luaState, iter);
-                    (*iter)++;
+                    ++(*iter);
                 }
                 else
                 {
