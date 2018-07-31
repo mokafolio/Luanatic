@@ -1738,7 +1738,6 @@ namespace luanatic
 
                 if (lua_isnil(_luaState, -1))
                 {
-                    // printf("PUSHING FRESH!\n");
                     lua_pop(_luaState, 1); // glua.weakTable id
                     void * ptr = lua_newuserdata(_luaState, sizeof(detail::UserData));
                     detail::UserData * userData = static_cast<detail::UserData *>(ptr); // glua.weakTable id ud
@@ -1768,8 +1767,6 @@ namespace luanatic
                 }
                 else
                 {
-                    printf("PUSHING EXISTING %p\n", _obj);
-
                     // if this type is not found in the inheritance chain,
                     // we can assume, that the currently pushed type sits higher in the inheritance
                     // chain, so we therefore update the type id associated with this instance.
@@ -1792,10 +1789,7 @@ namespace luanatic
                         lua_remove(_luaState, -2); // glua.weakTable id ud mt
                         lua_setmetatable(_luaState, -2); // glua.weakTable id ud
                     }
-                    else
-                    {
-                        STICK_ASSERT(false);
-                    }
+
                     //and return the existing user data associated with this instance
                     lua_replace(_luaState, -3); // ud id
                     lua_pop(_luaState, 1);      // ud
@@ -3652,9 +3646,7 @@ namespace luanatic
         template <class T>
         stick::Int32 destruct(lua_State * _luaState)
         {
-            // printf("DESTRUCT\n");
             T * obj = convertToTypeAndCheck<T>(_luaState, 1);
-            // printf("%p\n", obj);
 
             if (obj)
             {
