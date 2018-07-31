@@ -1,3 +1,5 @@
 add_executable (LuanaticTests LuanaticTests.cpp)
+set_target_properties(LuanaticTests PROPERTIES COMPILE_FLAGS "-fsanitize=address")
+set_target_properties(LuanaticTests PROPERTIES LINK_FLAGS "-fsanitize=address")
 target_link_libraries(LuanaticTests ${LUANATICDEPS})
 add_custom_target(check COMMAND LuanaticTests)

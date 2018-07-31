@@ -8,6 +8,7 @@
 #include <Stick/TypeInfo.hpp>
 #include <Stick/TypeList.hpp>
 #include <Stick/UniquePtr.hpp>
+#include <Stick/SharedPtr.hpp>
 #include <Stick/Maybe.hpp>
 #include <Stick/Result.hpp>
 #include <Stick/URI.hpp>
@@ -160,6 +161,17 @@ namespace luanatic
 
     namespace detail
     {
+        stick::String demangleTypeName(const char * _name)
+        {
+            stick::Int32 status;
+#ifdef __GNUC__
+            auto ret = abi::__cxa_demangle(_name, NULL, NULL, &status);
+            return ret ? stick::String(ret) : _name;
+#else
+            return _name;
+#endif
+        }
+
         //function signature that computes an argument score
         //based on the current arguments on the stack (for signature matching)
         typedef stick::Int32 (*ArgScoreFunction) (lua_State *, stick::Int32, stick::Int32, stick::Int32 *);
@@ -306,6 +318,15 @@ namespace luanatic
 
         //implemented further down, as we need detail::LuanaticState for memory allocation
         static stick::Int32 push(lua_State * _state, const stick::UniquePtr<U> & _value);
+    };
+
+    template <class U>
+    struct ValueTypeConverter<stick::SharedPtr<U>>
+    {
+        static const stick::SharedPtr<U> & convertAndCheck(lua_State * _state, stick::Int32 _index);
+
+        //implemented further down, as we need detail::LuanaticState for memory allocation
+        static stick::Int32 push(lua_State * _state, const stick::SharedPtr<U> & _value);
     };
 
     template <>
@@ -706,6 +727,15 @@ namespace luanatic
             static UserData cast(const UserData & _ud, detail::LuanaticState & _state)
             {
                 return {(To *)static_cast<stick::UniquePtr<From> *>(_ud.m_data)->get(), _ud.m_bOwnedByLua, stick::TypeInfoT<To>::typeID()};
+            }
+        };
+
+        template <class From, class To>
+        struct TypeCaster<stick::SharedPtr<From>, To>
+        {
+            static UserData cast(const UserData & _ud, detail::LuanaticState & _state)
+            {
+                return {(To *)static_cast<stick::SharedPtr<From> *>(_ud.m_data)->get(), _ud.m_bOwnedByLua, stick::TypeInfoT<To>::typeID()};
             }
         };
     }
@@ -1406,13 +1436,29 @@ namespace luanatic
     }
 
     template <class U>
-    stick::Int32 ValueTypeConverter <stick::UniquePtr<U>>::push(lua_State * _state, const stick::UniquePtr<U> & _value)
+    stick::Int32 ValueTypeConverter<stick::UniquePtr<U>>::push(lua_State * _state, const stick::UniquePtr<U> & _value)
     {
         detail::LuanaticState * state = detail::luanaticState(_state);
         STICK_ASSERT(state);
         //damn...this const cast feels hella sketchy let's see if we can come up with a better way to push
         //unique pointers from value. (I think this might be as good as it gets)
         luanatic::push(_state, state->m_allocator->create<stick::UniquePtr<U>>(std::move(const_cast<stick::UniquePtr<U>&>(_value))), true);
+        return 1;
+    }
+
+    template <class U>
+    const stick::SharedPtr<U> & ValueTypeConverter<stick::SharedPtr<U>>::convertAndCheck(lua_State * _state, stick::Int32 _index)
+    {
+        return *convertToTypeAndCheck<stick::SharedPtr<U>>(_state, _index);
+    }
+
+    template <class U>
+    stick::Int32 ValueTypeConverter<stick::SharedPtr<U>>::push(lua_State * _state, const stick::SharedPtr<U> & _value)
+    {
+        detail::LuanaticState * state = detail::luanaticState(_state);
+        STICK_ASSERT(state);
+        //see comment in uniqueptr function
+        luanatic::push(_state, state->m_allocator->create<stick::SharedPtr<U>>(std::move(const_cast<stick::SharedPtr<U>&>(_value))), true);
         return 1;
     }
 
@@ -1635,7 +1681,7 @@ namespace luanatic
             if (it != glua->m_typeIDClassMap.end())
             {
                 detail::luaErrorWithStackTrace(_luaState, _index, "%s expected, got %s",
-                                               glua->m_typeIDClassMap[stick::TypeInfoT<T>::typeID()].wrapper->m_className.cString(),
+                                               detail::demangleTypeName(glua->m_typeIDClassMap[stick::TypeInfoT<T>::typeID()].wrapper->m_className.cString()).cString(),
                                                luaL_typename(_luaState, _index));
             }
             else
@@ -1692,6 +1738,7 @@ namespace luanatic
 
                 if (lua_isnil(_luaState, -1))
                 {
+                    // printf("PUSHING FRESH!\n");
                     lua_pop(_luaState, 1); // glua.weakTable id
                     void * ptr = lua_newuserdata(_luaState, sizeof(detail::UserData));
                     detail::UserData * userData = static_cast<detail::UserData *>(ptr); // glua.weakTable id ud
@@ -1721,9 +1768,12 @@ namespace luanatic
                 }
                 else
                 {
+                    printf("PUSHING EXISTING %p\n", _obj);
+
                     // if this type is not found in the inheritance chain,
                     // we can assume, that the currently pushed type sits higher in the inheritance
                     // chain, so we therefore update the type id associated with this instance.
+                    //@TODO: More sanity checks!!!!!11111
                     if (std::is_polymorphic<T>() && !isOfType<WT>(_luaState, -1, false))
                     {
                         // update the type id
@@ -1741,6 +1791,10 @@ namespace luanatic
                         lua_getfield(_luaState, -1, (*it).value.wrapper->m_className.cString()); // glua.weakTable id ud namespace mt
                         lua_remove(_luaState, -2); // glua.weakTable id ud mt
                         lua_setmetatable(_luaState, -2); // glua.weakTable id ud
+                    }
+                    else
+                    {
+                        STICK_ASSERT(false);
                     }
                     //and return the existing user data associated with this instance
                     lua_replace(_luaState, -3); // ud id
@@ -1923,10 +1977,10 @@ namespace luanatic
         };
 
         template <class T>
-        struct Pusher<T *const>
+        struct Pusher<T * const>
         {
             template<class Policy>
-            static stick::Int32 push(lua_State * _luaState, T *const _val, const Policy & _policy = Policy())
+            static stick::Int32 push(lua_State * _luaState, T * const _val, const Policy & _policy = Policy())
             {
                 return ApplyPolicyPtr<Policy>::apply(_luaState, _val, _policy);
             }
@@ -2357,17 +2411,6 @@ namespace luanatic
         inline Ret callFunction(lua_State * _state, F _callable)
         {
             return callFunctionImpl<Ret>(_state, _callable, make_index_sequence<sizeof...(Args)>());
-        }
-
-        stick::String demangleTypeName(const char * _name)
-        {
-            stick::Int32 status;
-#ifdef __GNUC__
-            auto ret = abi::__cxa_demangle(_name, NULL, NULL, &status);
-            return ret ? stick::String(ret) : _name;
-#else
-            return _name;
-#endif
         }
 
         template<class T>
@@ -3609,7 +3652,9 @@ namespace luanatic
         template <class T>
         stick::Int32 destruct(lua_State * _luaState)
         {
+            // printf("DESTRUCT\n");
             T * obj = convertToTypeAndCheck<T>(_luaState, 1);
+            // printf("%p\n", obj);
 
             if (obj)
             {
@@ -3857,6 +3902,7 @@ namespace luanatic
             lntcNamespace.registerFunction("class", detail::luanaticClassFunction);
             lntcNamespace.registerFunction("isBaseOf", detail::luanaticIsBaseOf);
             lntcNamespace.registerFunction("isInstanceOf", detail::luanaticIsInstanceOf);
+            
             //lntcNamespace.registerFunction("ensureClass", detail::gluaEnsureClass);
             lntcNamespace.reset(); //reset to pop off the key from the stack
             lua_pop(_state, 1);
